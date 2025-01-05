@@ -1,11 +1,14 @@
 use crate::interface::{Health, InferenceModule, Input, MetricsData, ModuleCapabilities, Output};
 use async_trait::async_trait;
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 use std::error::Error;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use serde::{Serialize, Deserialize};
 
 /// Represents a module's implementation type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ModuleType {
     /// A module running in a Docker container
     Docker {
@@ -26,10 +29,10 @@ pub enum ModuleType {
 }
 
 /// A module instance that can be Docker-based, native, or Python
+#[derive(Clone)]
 pub struct Module {
     module_type: ModuleType,
-    python_module: Option<PyObject>,
-    // Add fields for module management (status, metrics, etc.)
+    python_module: Arc<Mutex<Option<PyObject>>>,
 }
 
 impl Module {
@@ -37,18 +40,18 @@ impl Module {
     pub fn new(module_type: ModuleType) -> Self {
         Self { 
             module_type,
-            python_module: None,
+            python_module: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Start the module
-    pub async fn start(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn start(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         match &self.module_type {
-            ModuleType::Docker { image, tag, port } => {
+            ModuleType::Docker { image: _, tag: _, port: _ } => {
                 // Implement Docker container start logic
                 todo!("Implement Docker container start")
             }
-            ModuleType::Native { library_path } => {
+            ModuleType::Native { library_path: _ } => {
                 // Implement native library loading logic
                 todo!("Implement native library loading")
             }
@@ -60,13 +63,13 @@ impl Module {
                 // Initialize Python interpreter
                 Python::with_gil(|py| -> PyResult<()> {
                     // Create/activate virtualenv if specified
-                    if let Some(venv) = venv_path {
+                    if let Some(_venv) = venv_path {
                         // Implement venv activation
                         todo!("Implement venv activation");
                     }
 
                     // Install requirements if specified
-                    if let Some(req_path) = requirements_path {
+                    if let Some(_req_path) = requirements_path {
                         // Implement pip install
                         todo!("Implement pip install");
                     }
@@ -78,17 +81,16 @@ impl Module {
                     let instance = module.getattr("Module")?.call0()?;
                     
                     // Store the Python module instance
-                    self.python_module = Some(instance.into());
+                    *self.python_module.lock().unwrap() = Some(instance.into());
                     
                     Ok(())
-                })?;
-                Ok(())
+                }).map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)
             }
         }
     }
 
     /// Stop the module
-    pub async fn stop(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn stop(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         match &self.module_type {
             ModuleType::Docker { .. } => {
                 // Implement Docker container stop logic
@@ -100,23 +102,40 @@ impl Module {
             }
             ModuleType::Python { .. } => {
                 // Clear Python module reference
-                self.python_module = None;
+                *self.python_module.lock().unwrap() = None;
                 Ok(())
             }
         }
     }
 
     /// Helper function to call Python module methods
-    async fn call_python_method<T>(&self, method: &str, args: Option<&PyTuple>) -> Result<T, Box<dyn Error + Send + Sync>> 
+    async fn call_python_method<T>(&self, method: &str) -> Result<T, Box<dyn Error + Send + Sync>> 
     where
-        T: FromPyObject<'static>
+        T: for<'a> FromPyObject<'a>
     {
-        if let Some(module) = &self.python_module {
+        let module = self.python_module.lock().unwrap().clone();
+        if let Some(module) = module {
             Python::with_gil(|py| {
-                let args = args.unwrap_or_else(|| PyTuple::empty(py));
+                let result = module.call_method0(py, method)?;
+                Ok(result.extract(py)?)
+            }).map_err(|e: PyErr| Box::new(e) as Box<dyn Error + Send + Sync>)
+        } else {
+            Err("Python module not initialized".into())
+        }
+    }
+
+    /// Helper function to call Python module methods with arguments
+    async fn call_python_method_with_args<T>(&self, method: &str, args: Vec<PyObject>) -> Result<T, Box<dyn Error + Send + Sync>> 
+    where
+        T: for<'a> FromPyObject<'a>
+    {
+        let module = self.python_module.lock().unwrap().clone();
+        if let Some(module) = module {
+            Python::with_gil(|py| {
+                let args = PyTuple::new(py, args.as_slice());
                 let result = module.call_method1(py, method, args)?;
                 Ok(result.extract(py)?)
-            })
+            }).map_err(|e: PyErr| Box::new(e) as Box<dyn Error + Send + Sync>)
         } else {
             Err("Python module not initialized".into())
         }
@@ -128,7 +147,15 @@ impl InferenceModule for Module {
     async fn initialize(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         match &self.module_type {
             ModuleType::Python { .. } => {
-                self.call_python_method("initialize", None).await
+                let module = self.python_module.lock().unwrap().clone();
+                if let Some(module) = module {
+                    Python::with_gil(|py| {
+                        module.call_method0(py, "initialize")?;
+                        Ok(())
+                    }).map_err(|e: PyErr| Box::new(e) as Box<dyn Error + Send + Sync>)
+                } else {
+                    Err("Python module not initialized".into())
+                }
             }
             _ => self.start().await
         }
@@ -136,7 +163,7 @@ impl InferenceModule for Module {
 
     async fn health_check(&self) -> Result<Health, Box<dyn Error + Send + Sync>> {
         match &self.module_type {
-            ModuleType::Docker { port, .. } => {
+            ModuleType::Docker { port: _, .. } => {
                 // Implement Docker health check logic
                 todo!("Implement Docker health check")
             }
@@ -145,7 +172,7 @@ impl InferenceModule for Module {
                 todo!("Implement native health check")
             }
             ModuleType::Python { .. } => {
-                self.call_python_method("health_check", None).await
+                self.call_python_method("health_check").await
             }
         }
     }
@@ -153,23 +180,23 @@ impl InferenceModule for Module {
     fn get_capabilities(&self) -> ModuleCapabilities {
         match &self.module_type {
             ModuleType::Python { .. } => {
-                Python::with_gil(|py| {
-                    self.python_module
-                        .as_ref()
-                        .unwrap()
-                        .call_method0(py, "get_capabilities")
-                        .unwrap()
-                        .extract(py)
-                        .unwrap()
-                })
+                let module = self.python_module.lock().unwrap().clone();
+                if let Some(module) = module {
+                    Python::with_gil(|py| -> PyResult<ModuleCapabilities> {
+                        let result = module.call_method0(py, "get_capabilities")?;
+                        result.extract(py)
+                    }).unwrap_or_else(|_| ModuleCapabilities::default())
+                } else {
+                    ModuleCapabilities::default()
+                }
             }
-            _ => todo!("Implement get_capabilities for other module types")
+            _ => ModuleCapabilities::default()
         }
     }
 
     async fn run_inference(&self, input: Input) -> Result<Output, Box<dyn Error + Send + Sync>> {
         match &self.module_type {
-            ModuleType::Docker { port, .. } => {
+            ModuleType::Docker { port: _, .. } => {
                 // Implement Docker inference logic
                 todo!("Implement Docker inference")
             }
@@ -178,14 +205,11 @@ impl InferenceModule for Module {
                 todo!("Implement native inference")
             }
             ModuleType::Python { .. } => {
-                Python::with_gil(|py| {
-                    let args = PyTuple::new(py, &[input]);
-                    self.python_module
-                        .as_ref()
-                        .unwrap()
-                        .call_method1(py, "run_inference", args)?
-                        .extract(py)
-                })
+                let args = Python::with_gil(|py| -> PyResult<Vec<PyObject>> {
+                    Ok(vec![input.into_py(py)])
+                }).map_err(|e: PyErr| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+                
+                self.call_python_method_with_args("run_inference", args).await
             }
         }
     }
@@ -193,17 +217,57 @@ impl InferenceModule for Module {
     fn get_metrics(&self) -> MetricsData {
         match &self.module_type {
             ModuleType::Python { .. } => {
-                Python::with_gil(|py| {
-                    self.python_module
-                        .as_ref()
-                        .unwrap()
-                        .call_method0(py, "get_metrics")
-                        .unwrap()
-                        .extract(py)
-                        .unwrap()
-                })
+                let module = self.python_module.lock().unwrap().clone();
+                if let Some(module) = module {
+                    Python::with_gil(|py| -> PyResult<MetricsData> {
+                        let result = module.call_method0(py, "get_metrics")?;
+                        result.extract(py)
+                    }).unwrap_or_else(|_| MetricsData::default())
+                } else {
+                    MetricsData::default()
+                }
             }
-            _ => todo!("Implement get_metrics for other module types")
+            _ => MetricsData::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleStatus {
+    pub state: ModuleState,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ModuleState {
+    Stopped,
+    Starting,
+    Running,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleConfig {
+    pub name: String,
+    pub module_type: ModuleType,
+    pub status: ModuleStatus,
+}
+
+impl ModuleStatus {
+    pub fn new() -> Self {
+        Self {
+            state: ModuleState::Stopped,
+            error: None,
+        }
+    }
+}
+
+impl ModuleConfig {
+    pub fn new(name: String, module_type: ModuleType) -> Self {
+        Self {
+            name,
+            module_type,
+            status: ModuleStatus::new(),
         }
     }
 }

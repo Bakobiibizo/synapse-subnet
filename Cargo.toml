@@ -25,5 +25,5 @@ members = [
     "crates/validator",
     "crates/miner",
     "crates/registrar",
-    "crates/chain-api",
+    "crates/chain-api", "crates/registrar-api",
 ]

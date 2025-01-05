@@ -4,7 +4,8 @@
 //! inference modules, supporting both Docker-based and native implementations.
 
 pub mod interface;
-pub mod module;
+mod module;
+mod registry;
 
 pub use interface::{
     Health, HealthStatus, InferenceModule, InferenceParameters,
@@ -12,6 +13,7 @@ pub use interface::{
     TokenUsage,
 };
 pub use module::{Module, ModuleType};
+pub use registry::{LocalRegistry, ModuleConfig, ModuleStatus, ModuleState, Registry, RegistryError};
 
 #[cfg(test)]
 mod tests {
