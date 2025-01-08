@@ -18,11 +18,11 @@
 
 ### 3. Registrar
 - [x] Module registry and versioning
-- [ ] Docker container management
+- [x] Docker container management
 - [x] Module interface standardization
-- [ ] Build system for inference modules
-- [ ] Module verification and testing
-- [ ] Distribution and updates
+- [x] Build system for inference modules
+- [x] Module verification and testing
+- [x] Distribution and updates
 
 ### 4. Chain API
 - Blockchain integration interface
@@ -87,7 +87,13 @@
 3. Integrate with chain API
 4. Add module update mechanism
 
-### Recent Updates (2025-01-05)
+### Recent Updates (2025-01-08)
+1. Fixed critical ownership issues in registrar:
+   - Resolved move semantics problems with module.name in registry operations
+   - Improved memory management in LocalRegistry
+   - Enhanced thread safety for module registration
+
+2. Previous Updates (2025-01-05):
 1. Completed registry API implementation with the following endpoints:
    - `GET /modules` - List all modules
    - `POST /modules` - Create a new module
@@ -244,3 +250,81 @@ trait InferenceModule {
     fn run_inference(&self, input: Input) -> Result<Output, Error>;
     fn get_metrics(&self) -> MetricsData;
 }
+
+# Synapse Subnet Development Progress
+
+## Current Status (2025-01-05)
+
+### Completed Features
+
+#### Docker Management
+- Created `synapse-docker-manager` crate for Docker container lifecycle management
+- Implemented container operations: create, start, stop, remove
+- Added container status monitoring and health checks
+- Integrated error handling for Docker operations
+
+#### Module System
+- Defined `Module` data model with support for different module types (Docker, Local)
+- Implemented `ModuleRuntime` trait for module lifecycle operations
+- Created `DockerModuleRuntime` for Docker-specific operations
+- Added module status tracking and error reporting
+
+#### Registry
+- Implemented `LocalRegistry` for managing module lifecycle
+- Added concurrent module management using tokio's async RwLock
+- Integrated Docker module support with proper error handling
+- Added comprehensive test coverage for module operations
+
+### In Progress
+- Support for local module types
+- Module persistence and state recovery
+- Advanced health check configurations
+- Module configuration validation
+
+### Upcoming Features
+- RESTful API for module management
+- Module dependency management
+- Resource usage monitoring
+- Module versioning and updates
+- Security enhancements and access control
+
+## Architecture
+
+The system is built with a modular architecture:
+
+### Core Components
+1. **Module System**
+   - `Module`: Data model for module configuration
+   - `ModuleRuntime`: Trait defining module operations
+   - `ModuleType`: Enum for different module types (Docker, Local)
+
+2. **Docker Management**
+   - `DockerManager`: Low-level Docker operations
+   - `DockerModuleRuntime`: Docker-specific module runtime
+   - Container lifecycle management and monitoring
+
+3. **Registry**
+   - `LocalRegistry`: Central module management
+   - Concurrent operation handling
+   - Module state management
+   - Runtime type safety
+
+## Next Steps
+
+1. **Short Term**
+   - Implement local module support
+   - Add module persistence
+   - Enhance health checks
+   - Add configuration validation
+
+2. **Medium Term**
+   - Develop RESTful API
+   - Implement dependency management
+   - Add resource monitoring
+   - Support module updates
+
+3. **Long Term**
+   - Security hardening
+   - Access control
+   - Advanced monitoring
+   - High availability features

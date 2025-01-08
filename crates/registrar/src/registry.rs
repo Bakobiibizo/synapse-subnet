@@ -1,353 +1,215 @@
-use crate::module::{Module, ModuleType};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use crate::docker::DockerModuleRuntime;
+use crate::module::{Module, ModuleRuntime, ModuleStatus};
+use crate::verification::{ModuleVerifier, VerificationError};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
-use std::sync::{Arc, RwLock};
-use std::path;
+use tokio::sync::RwLock;
 
-#[derive(Error, Debug)]
+/// Errors that can occur during registry operations
+#[derive(Debug, Error)]
 pub enum RegistryError {
+    /// Module with the given name was not found
     #[error("Module not found: {0}")]
     ModuleNotFound(String),
+    /// Attempted to register a module with a name that already exists
     #[error("Module already exists: {0}")]
     ModuleExists(String),
-    #[error("Invalid module configuration: {0}")]
-    InvalidConfig(String),
-    #[error("Module operation failed: {0}")]
-    OperationFailed(String),
+    /// Module verification failed
+    #[error("Module verification failed: {0}")]
+    VerificationError(#[from] VerificationError),
+    /// Module runtime error
+    #[error("Module runtime error: {0}")]
+    RuntimeError(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleConfig {
-    pub name: String,
-    pub module_type: ModuleType,
-    pub status: ModuleStatus,
-}
-
-impl ModuleConfig {
-    pub fn new(name: String, module_type: ModuleType) -> Self {
-        Self {
-            name,
-            module_type,
-            status: ModuleStatus::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleStatus {
-    pub state: ModuleState,
-    pub last_error: Option<String>,
-    pub uptime: Option<u64>,
-}
-
-impl ModuleStatus {
-    pub fn new() -> Self {
-        Self {
-            state: ModuleState::Stopped,
-            last_error: None,
-            uptime: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum ModuleState {
-    Running,
-    Stopped,
-    Error,
-}
-
-#[async_trait]
-pub trait Registry: Send + Sync {
-    /// List all registered modules
-    async fn list_modules(&self) -> Result<Vec<ModuleConfig>, RegistryError>;
-
-    /// Get a module by name
-    async fn get_module(&self, name: &str) -> Result<ModuleConfig, RegistryError>;
-
-    /// Register a new module
-    async fn register_module(&self, config: ModuleConfig) -> Result<(), RegistryError>;
-
-    /// Update an existing module
-    async fn update_module(&self, name: &str, config: ModuleConfig) -> Result<(), RegistryError>;
-
-    /// Remove a module
-    async fn remove_module(&self, name: &str) -> Result<(), RegistryError>;
-
-    /// Get the status of a module
-    async fn get_module_status(&self, name: &str) -> Result<ModuleStatus, RegistryError>;
-}
-
-/// A local registry for managing inference modules
+/// Local registry for managing modules
 pub struct LocalRegistry {
-    storage_path: PathBuf,
-    modules: Arc<RwLock<HashMap<String, ModuleConfig>>>,
+    modules: Arc<RwLock<HashMap<String, Module>>>,
+    runtimes: Arc<RwLock<HashMap<String, Box<dyn ModuleRuntime + Send + Sync>>>>,
 }
 
 impl LocalRegistry {
-    /// Create a new registry with the given storage path
-    pub fn new(storage_path: PathBuf) -> Self {
-        Self {
-            storage_path,
+    /// Create a new LocalRegistry
+    pub async fn new() -> Result<Self, RegistryError> {
+        Ok(Self {
             modules: Arc::new(RwLock::new(HashMap::new())),
-        }
+            runtimes: Arc::new(RwLock::new(HashMap::new())),
+        })
     }
 
-    /// Get the absolute path for a module
-    fn get_module_path(&self, module_path: &str) -> PathBuf {
-        let path = PathBuf::from(module_path);
-        if path.is_absolute() {
-            path
+    /// Register a new module in the registry
+    pub async fn register_module(&self, module: Module) -> Result<(), RegistryError> {
+        ModuleVerifier::default().verify(&module).map_err(RegistryError::VerificationError)?;
+
+        let mut modules = self.modules.write().await;
+        let mut runtimes = self.runtimes.write().await;
+
+        if modules.contains_key(&module.name) {
+            return Err(RegistryError::ModuleExists(module.name.clone()));
+        }
+
+        let runtime = Box::new(DockerModuleRuntime::new(module.clone()).await.map_err(|e| {
+            RegistryError::RuntimeError(format!("Failed to create runtime: {}", e))
+        })?);
+
+        let name = module.name.clone();
+        modules.insert(name.clone(), module);
+        runtimes.insert(name, runtime);
+
+        Ok(())
+    }
+
+    /// Unregister a module from the registry
+    pub async fn unregister_module(&self, name: &str) -> Result<(), RegistryError> {
+        if let Some(_module) = self.modules.write().await.remove(name) {
+            Ok(())
         } else {
-            self.storage_path.join(module_path)
+            Err(RegistryError::ModuleNotFound(name.to_string()))
         }
     }
-}
 
-#[async_trait]
-impl Registry for LocalRegistry {
-    async fn list_modules(&self) -> Result<Vec<ModuleConfig>, RegistryError> {
-        Ok(self.modules.read().unwrap().values().cloned().collect())
-    }
-
-    async fn get_module(&self, name: &str) -> Result<ModuleConfig, RegistryError> {
-        self.modules.read().unwrap()
-            .get(name)
-            .cloned()
-            .ok_or_else(|| RegistryError::ModuleNotFound(name.to_string()))
-    }
-
-    async fn register_module(&self, config: ModuleConfig) -> Result<(), RegistryError> {
-        let mut modules = self.modules.write().unwrap();
-        if modules.contains_key(&config.name) {
-            return Err(RegistryError::ModuleExists(config.name));
+    /// Start a module
+    pub async fn start_module(&self, name: &str) -> Result<(), RegistryError> {
+        let runtimes = self.runtimes.read().await;
+        if let Some(runtime) = runtimes.get(name) {
+            runtime.start().await.map_err(|e| {
+                RegistryError::RuntimeError(format!("Failed to start module: {}", e))
+            })?;
+            Ok(())
+        } else {
+            Err(RegistryError::ModuleNotFound(name.to_string()))
         }
-        modules.insert(config.name.clone(), config);
-        Ok(())
     }
 
-    async fn update_module(&self, name: &str, config: ModuleConfig) -> Result<(), RegistryError> {
-        let mut modules = self.modules.write().unwrap();
-        if !modules.contains_key(name) {
-            return Err(RegistryError::ModuleNotFound(name.to_string()));
+    /// Stop a module
+    pub async fn stop_module(&self, name: &str) -> Result<(), RegistryError> {
+        let runtimes = self.runtimes.read().await;
+        if let Some(runtime) = runtimes.get(name) {
+            runtime.stop().await.map_err(|e| {
+                RegistryError::RuntimeError(format!("Failed to stop module: {}", e))
+            })?;
+            Ok(())
+        } else {
+            Err(RegistryError::ModuleNotFound(name.to_string()))
         }
-        modules.insert(name.to_string(), config);
-        Ok(())
     }
 
-    async fn remove_module(&self, name: &str) -> Result<(), RegistryError> {
-        let mut modules = self.modules.write().unwrap();
-        if modules.remove(name).is_none() {
-            return Err(RegistryError::ModuleNotFound(name.to_string()));
+    /// Get module status
+    pub async fn get_module_status(&self, name: &str) -> Result<ModuleStatus, RegistryError> {
+        let runtimes = self.runtimes.read().await;
+        if let Some(runtime) = runtimes.get(name) {
+            runtime.status().await.map_err(|e| {
+                RegistryError::RuntimeError(format!("Failed to get module status: {}", e))
+            })
+        } else {
+            Err(RegistryError::ModuleNotFound(name.to_string()))
         }
-        Ok(())
     }
 
-    async fn get_module_status(&self, name: &str) -> Result<ModuleStatus, RegistryError> {
-        let config = self.get_module(name).await?;
-        Ok(config.status)
+    /// Get a module by name
+    pub async fn get_module(&self, name: &str) -> Result<Module, RegistryError> {
+        let modules = self.modules.read().await;
+        if let Some(module) = modules.get(name) {
+            Ok(module.clone())
+        } else {
+            Err(RegistryError::ModuleNotFound(name.to_string()))
+        }
+    }
+
+    /// List all modules in the registry
+    pub async fn list_modules(&self) -> Result<Vec<Module>, RegistryError> {
+        let modules = self.modules.read().await;
+        Ok(modules.values().cloned().collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::thread;
+    use crate::module::{ModuleType, ModuleStatus};
+    use std::collections::HashMap;
 
-    fn create_test_config(name: &str) -> ModuleConfig {
-        ModuleConfig {
+    fn create_test_module(name: &str) -> Module {
+        Module {
             name: name.to_string(),
-            module_type: ModuleType::Python {
-                module_path: PathBuf::from("test.py"),
-                requirements_path: None,
-                venv_path: None,
+            module_type: ModuleType::Docker {
+                image: "docker.io/library/nginx".to_string(),
+                tag: "latest".to_string(),
+                port: 8084,  // Using a different port
+                env: Some(HashMap::from([
+                    ("NGINX_PORT".to_string(), "80".to_string()),
+                    ("MODULE_NAME".to_string(), name.to_string()),
+                    ("MODULE_PORT".to_string(), "8084".to_string()),
+                ])),
+                volumes: Some(HashMap::from([
+                    ("/tmp/test".to_string(), "/usr/share/nginx/html".to_string()),
+                ])),
+                health_check: None,
             },
             status: ModuleStatus::new(),
         }
     }
 
-    fn create_test_registry() -> LocalRegistry {
-        LocalRegistry::new(PathBuf::from("/tmp/test_registry"))
+    #[tokio::test]
+    async fn test_register_module() {
+        let registry = LocalRegistry::new()
+            .await
+            .unwrap();
+
+        let module = create_test_module("test-register");
+        registry.register_module(module.clone()).await.unwrap();
+
+        let registered = registry.get_module("test-register").await.unwrap();
+        assert_eq!(registered.name, "test-register");
     }
 
-    #[test]
-    fn test_register_module() {
-        let mut registry = create_test_registry();
-        let config = create_test_config("test");
-        assert!(registry.register_module(config.clone()).is_ok());
-        assert!(registry.register_module(config).is_err());
+    #[tokio::test]
+    async fn test_get_module() {
+        let registry = LocalRegistry::new()
+            .await
+            .unwrap();
+
+        let module = create_test_module("test-get");
+        registry.register_module(module.clone()).await.unwrap();
+
+        let result = registry.get_module("test-get").await.unwrap();
+        assert_eq!(result.name, "test-get");
+
+        let result = registry.get_module("nonexistent").await;
+        assert!(result.is_err());
     }
 
-    #[test]
-    fn test_list_modules() {
-        let mut registry = create_test_registry();
-        let config1 = create_test_config("test1");
-        let config2 = create_test_config("test2");
-        registry.register_module(config1).unwrap();
-        registry.register_module(config2).unwrap();
-        assert_eq!(registry.list_modules().unwrap().len(), 2);
+    #[tokio::test]
+    async fn test_list_modules() {
+        let registry = LocalRegistry::new()
+            .await
+            .unwrap();
+
+        let module1 = create_test_module("test-list-1");
+        let module2 = create_test_module("test-list-2");
+
+        registry.register_module(module1).await.unwrap();
+        registry.register_module(module2).await.unwrap();
+
+        let modules = registry.list_modules().await.unwrap();
+        assert_eq!(modules.len(), 2);
+        assert!(modules.iter().any(|m| m.name == "test-list-1"));
+        assert!(modules.iter().any(|m| m.name == "test-list-2"));
     }
 
-    #[test]
-    fn test_update_module() {
-        let mut registry = create_test_registry();
-        let config = create_test_config("test");
-        registry.register_module(config.clone()).unwrap();
-        let mut updated_config = config.clone();
-        updated_config.status.state = ModuleState::Running;
-        assert!(registry.update_module(&config.name, updated_config).is_ok());
-        assert!(registry
-            .update_module("nonexistent", config)
-            .unwrap_err()
-            .to_string()
-            .contains("not found"));
-    }
+    #[tokio::test]
+    async fn test_unregister_module() {
+        let registry = LocalRegistry::new()
+            .await
+            .unwrap();
 
-    #[test]
-    fn test_remove_module() {
-        let mut registry = create_test_registry();
-        let config = create_test_config("test");
-        registry.register_module(config).unwrap();
-        assert!(registry.remove_module("test").is_ok());
-        assert!(registry
-            .remove_module("test")
-            .unwrap_err()
-            .to_string()
-            .contains("not found"));
-    }
+        let module = create_test_module("test-unregister");
+        registry.register_module(module).await.unwrap();
 
-    #[test]
-    fn test_get_module() {
-        let mut registry = create_test_registry();
-        let config = create_test_config("test");
-        registry.register_module(config.clone()).unwrap();
-        assert_eq!(registry.get_module("test").unwrap().name, config.name);
-        assert!(registry
-            .get_module("nonexistent")
-            .unwrap_err()
-            .to_string()
-            .contains("not found"));
-    }
+        registry.unregister_module("test-unregister").await.unwrap();
 
-    #[test]
-    fn test_concurrent_access() {
-        let registry = Arc::new(create_test_registry());
-        let mut handles = vec![];
-
-        // Spawn multiple threads to register modules
-        for i in 0..5 {
-            let registry = Arc::clone(&registry);
-            let handle = thread::spawn(move || {
-                let config = create_test_config(&format!("test{}", i));
-                registry.register_module(config).unwrap();
-            });
-            handles.push(handle);
-        }
-
-        // Wait for all threads to complete
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        assert_eq!(registry.list_modules().unwrap().len(), 5);
-    }
-
-    #[test]
-    fn test_path_handling() {
-        let registry = create_test_registry();
-        
-        // Test absolute paths
-        let absolute_path = "/absolute/path/to/module.py";
-        let config = ModuleConfig {
-            name: "absolute_path_test".to_string(),
-            module_type: ModuleType::Python {
-                module_path: PathBuf::from(absolute_path),
-                requirements_path: None,
-                venv_path: None,
-            },
-            status: ModuleStatus::new(),
-        };
-        registry.register_module(config).unwrap();
-
-        // Test relative paths
-        let relative_path = "relative/path/to/module.py";
-        let config = ModuleConfig {
-            name: "relative_path_test".to_string(),
-            module_type: ModuleType::Python {
-                module_path: PathBuf::from(relative_path),
-                requirements_path: Some(PathBuf::from("requirements.txt")),
-                venv_path: Some(PathBuf::from(".venv")),
-            },
-            status: ModuleStatus::new(),
-        };
-        registry.register_module(config).unwrap();
-
-        // Verify paths are properly resolved
-        let module = registry.get_module("relative_path_test").unwrap();
-        if let ModuleType::Python { module_path, requirements_path, venv_path } = &module.module_type {
-            assert!(module_path.is_absolute());
-            assert!(requirements_path.as_ref().unwrap().is_absolute());
-            assert!(venv_path.as_ref().unwrap().is_absolute());
-        }
-    }
-
-    #[test]
-    fn test_error_cases() {
-        let mut registry = create_test_registry();
-
-        // Test registering module with empty name
-        let config = ModuleConfig {
-            name: "".to_string(),
-            module_type: ModuleType::Python {
-                module_path: PathBuf::from("test.py"),
-                requirements_path: None,
-                venv_path: None,
-            },
-            status: ModuleStatus::new(),
-        };
-        assert!(registry.register_module(config).is_err());
-
-        // Test updating non-existent module
-        let config = create_test_config("nonexistent");
-        assert!(registry.update_module("nonexistent", config).is_err());
-
-        // Test getting non-existent module
-        assert!(registry.get_module("nonexistent").is_err());
-
-        // Test removing non-existent module
-        assert!(registry.remove_module("nonexistent").is_err());
-    }
-
-    #[test]
-    fn test_module_status_transitions() {
-        let mut registry = create_test_registry();
-        let mut config = create_test_config("test_status");
-        
-        // Test initial status
-        registry.register_module(config.clone()).unwrap();
-        assert!(matches!(
-            registry.get_module("test_status").unwrap().status.state,
-            ModuleState::Stopped
-        ));
-
-        // Test transition to Running
-        config.status.state = ModuleState::Running;
-        registry.update_module("test_status", config.clone()).unwrap();
-        assert!(matches!(
-            registry.get_module("test_status").unwrap().status.state,
-            ModuleState::Running
-        ));
-
-        // Test transition to Error
-        config.status.state = ModuleState::Error;
-        registry.update_module("test_status", config).unwrap();
-        assert!(matches!(
-            registry.get_module("test_status").unwrap().status.state,
-            ModuleState::Error
-        ));
+        let result = registry.get_module("test-unregister").await;
+        assert!(result.is_err());
     }
 }
