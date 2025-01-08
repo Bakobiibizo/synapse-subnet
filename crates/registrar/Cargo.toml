@@ -11,6 +11,8 @@ serde_json = "1.0"
 thiserror = "1.0"
 tracing = "0.1"
 pyo3 = { version = "0.19", features = ["auto-initialize"] }
+synapse-docker-manager = { path = "../docker-manager" }
+url = "2.5.0"
 
 [dev-dependencies]
 tokio-test = "0.4"

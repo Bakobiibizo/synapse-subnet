@@ -1,3 +1,39 @@
+//! Registrar API implementation for the Synapse Subnet project.
+//!
+//! This crate provides the REST API interface for the module registry system.
+//!
+//! Required Features and Components:
+//! 1. REST API Endpoints
+//!    - GET /modules - List all modules
+//!    - POST /modules - Create new module
+//!    - GET /modules/:name - Get module details
+//!    - PUT /modules/:name - Update module
+//!    - DELETE /modules/:name - Remove module
+//!    - GET /modules/:name/status - Get status
+//!    - PUT /modules/:name/status - Update status
+//!
+//! 2. Request/Response Handling
+//!    - Input validation
+//!    - Error handling
+//!    - Response formatting
+//!    - Status codes
+//!
+//! 3. Authentication & Authorization
+//!    - API key validation
+//!    - Role-based access
+//!    - Rate limiting
+//!
+//! 4. Monitoring & Logging
+//!    - Request logging
+//!    - Performance metrics
+//!    - Error tracking
+//!
+//! Key Interfaces Required:
+//! - RegistryInterface: For module management
+//! - AuthInterface: For authentication
+//! - MetricsInterface: For monitoring
+//! - LoggingInterface: For request logging
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,

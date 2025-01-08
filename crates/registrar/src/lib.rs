@@ -6,14 +6,18 @@
 pub mod interface;
 mod module;
 mod registry;
+mod docker;
+pub mod verification;
 
 pub use interface::{
     Health, HealthStatus, InferenceModule, InferenceParameters,
     Input, MetricsData, ModuleCapabilities, Output, ResourceRequirements,
     TokenUsage,
 };
-pub use module::{Module, ModuleType};
-pub use registry::{LocalRegistry, ModuleConfig, ModuleStatus, ModuleState, Registry, RegistryError};
+pub use module::{Module, ModuleType, ModuleStatus, ModuleState, ModuleRuntime};
+pub use registry::{LocalRegistry, RegistryError};
+pub use docker::DockerModuleRuntime;
+pub use verification::{ModuleVerifier, VerificationConfig, VerificationError};
 
 #[cfg(test)]
 mod tests {

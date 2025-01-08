@@ -22,8 +22,7 @@ assert_matches = "1.5"
 
 [workspace]
 members = [
-    "crates/validator",
-    "crates/miner",
     "crates/registrar",
-    "crates/chain-api", "crates/registrar-api",
+    "crates/registrar-api",
+    "crates/docker-manager",
 ]
