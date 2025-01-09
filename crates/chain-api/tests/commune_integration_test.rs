@@ -6,17 +6,17 @@ struct TestFixture {
 }
 
 impl TestFixture {
-    fn new() -> Self {
-        // Use mainnet URL for tests
-        let mainnet_url = "wss://commune-api-node-2.communeai.net";
-        env::set_var("COMMUNE_RPC_URL", mainnet_url);
-        
+    fn new(use_testnet: bool) -> Self {
         // Set up Python environment
         let python_path = env::var("VIRTUAL_ENV")
             .map(|venv| format!("{}/bin/python", venv))
             .unwrap_or_else(|_| "python3".to_string());
         
-        let rpc = CommuneRPC::new(python_path, mainnet_url.to_string());
+        let rpc = if use_testnet {
+            CommuneRPC::testnet(python_path)
+        } else {
+            CommuneRPC::mainnet(python_path)
+        };
         
         Self { rpc }
     }
@@ -34,7 +34,7 @@ fn create_test_module(name: &str) -> CommuneModule {
 
 #[test]
 fn test_read_operations() {
-    let fixture = TestFixture::new();
+    let fixture = TestFixture::new(false);
     let netuid = 0;
 
     // Test listing modules
@@ -70,7 +70,7 @@ fn test_read_operations() {
 
 #[test]
 fn test_stake_operations() {
-    let fixture = TestFixture::new();
+    let fixture = TestFixture::new(false);
     let netuid = 0;
 
     // Test getting stake for an existing module
@@ -91,7 +91,7 @@ fn test_stake_operations() {
 
 #[test]
 fn test_network_parameters() {
-    let fixture = TestFixture::new();
+    let fixture = TestFixture::new(false);
     let netuid = 0;
 
     // Test getting minimum stake
@@ -113,7 +113,7 @@ fn test_network_parameters() {
 
 #[test]
 fn test_module_metadata() {
-    let fixture = TestFixture::new();
+    let fixture = TestFixture::new(false);
     let netuid = 0;
 
     // Test modules have valid metadata
@@ -138,7 +138,7 @@ fn test_module_metadata() {
 
 #[test]
 fn test_module_operations() {
-    let fixture = TestFixture::new();
+    let fixture = TestFixture::new(false);
     let netuid = 0;
 
     // Test listing modules
@@ -189,7 +189,7 @@ fn test_module_operations() {
 
 #[test]
 fn test_write_operations() {
-    let fixture = TestFixture::new();
+    let fixture = TestFixture::new(false);
     let netuid = 0;
 
     // Test module registration
@@ -227,11 +227,49 @@ fn test_invalid_network() {
     assert!(result.is_err(), "List modules should fail with invalid network");
 }
 
+#[test]
+fn test_mainnet_operations() {
+    let fixture = TestFixture::new(false);
+    let netuid = 0;
+
+    // Test getting stake for an existing module
+    let result = fixture.rpc.list_modules(netuid);
+    if let Ok(modules) = result {
+        if let Some(first_module) = modules.first() {
+            let stake_result = fixture.rpc.get_stake(&first_module.name, netuid);
+            assert!(stake_result.is_ok(), "Failed to get stake: {:?}", stake_result.err());
+            let _stake = stake_result.unwrap();
+            // Stake is always non-negative since it's u64
+        }
+    }
+
+    // Test getting stake for non-existent module
+    let result = fixture.rpc.get_stake("non_existent_module", netuid);
+    assert!(result.is_ok(), "Get stake should not error for non-existent module");
+    assert_eq!(result.unwrap(), 0, "Non-existent module should have 0 stake");
+}
+
+#[test]
+fn test_testnet_operations() {
+    let fixture = TestFixture::new(true);
+    let netuid = 0;
+
+    // Test basic network operations on testnet
+    let modules = fixture.rpc.list_modules(netuid);
+    assert!(modules.is_ok(), "Failed to list modules on testnet");
+
+    // Test module registration (should fail without funded key)
+    let module = create_test_module("test_module");
+    let result = fixture.rpc.register_module(module, netuid);
+    assert!(result.is_err(), "Module registration should fail without funded key");
+    assert!(result.unwrap_err().to_string().contains("Permission denied"));
+}
+
 // Note: The following tests are skipped as they require write access to the network
 #[test]
 #[ignore]
 fn test_register_and_stake() {
-    let fixture = TestFixture::new();
+    let fixture = TestFixture::new(false);
     let netuid = 0;
 
     // Create and register a test module

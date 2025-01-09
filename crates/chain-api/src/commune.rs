@@ -1,7 +1,6 @@
 use std::process::Command;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::env;
 
 /// Represents a Commune AI module
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +38,11 @@ pub trait CommuneInterface {
     fn get_max_allowed_modules(&self) -> Result<u64, Box<dyn Error>>;
 }
 
+/// Default mainnet URL for Commune network
+pub const MAINNET_URL: &str = "wss://commune-api-node-2.communeai.net";
+/// Testnet URL for Commune network
+pub const TESTNET_URL: &str = "wss://testnet.api.communeai.net";
+
 /// Implementation of CommuneInterface that uses Python communex library via subprocess
 pub struct CommuneRPC {
     python_path: String,
@@ -46,11 +50,21 @@ pub struct CommuneRPC {
 }
 
 impl CommuneRPC {
-    pub fn new(python_path: String, rpc_url: String) -> Self {
+    pub fn new(python_path: String, url: String) -> Self {
         Self { 
             python_path,
-            rpc_url,
+            rpc_url: url,
         }
+    }
+
+    /// Create a new CommuneRPC instance using mainnet
+    pub fn mainnet(python_path: String) -> Self {
+        Self::new(python_path, MAINNET_URL.to_string())
+    }
+
+    /// Create a new CommuneRPC instance using testnet
+    pub fn testnet(python_path: String) -> Self {
+        Self::new(python_path, TESTNET_URL.to_string())
     }
 
     fn run_python_command(&self, script_args: &[&str]) -> Result<String, Box<dyn Error>> {

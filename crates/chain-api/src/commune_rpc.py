@@ -5,13 +5,21 @@ from communex._common import get_node_url
 from communex.client import CommuneClient
 from substrateinterface import Keypair
 
-def get_client():
-    # First try to get URL from environment
-    url = os.environ.get('COMMUNE_RPC_URL')
-    if not url:
-        # Use mainnet URL
-        url = get_node_url() or "wss://commune-api-node-2.communeai.net"
+# Network URLs
+MAINNET_URL = "wss://commune-api-node-2.communeai.net"
+TESTNET_URL = "wss://testnet.api.communeai.net"
+
+def get_client(url=None):
+    """Get a Commune client instance.
     
+    Args:
+        url (str, optional): The network URL. If not provided, uses mainnet.
+    
+    Returns:
+        Client: A configured Commune client instance.
+    """
+    if url is None:
+        url = MAINNET_URL
     return CommuneClient(url)
 
 def handle_register_module(args):
