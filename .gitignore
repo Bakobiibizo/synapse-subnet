@@ -1,5 +1,9 @@
-# .commune-env/
+.commune-env/
 testing.py
+inspect_commune.py
+subspace_output.md
+**/PROGRESS.md
+
 
 /target
 
