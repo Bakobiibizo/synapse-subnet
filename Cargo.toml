@@ -25,4 +25,5 @@ members = [
     "crates/registrar",
     "crates/registrar-api",
     "crates/docker-manager",
+    "crates/chain-api",
 ]
