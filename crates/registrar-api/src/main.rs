@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use synapse_registrar::LocalRegistry;
+use registrar::LocalRegistry;
 
 #[tokio::main]
 async fn main() {
@@ -13,7 +13,7 @@ async fn main() {
     let registry = LocalRegistry::new(PathBuf::from(storage_path));
 
     // Create the router
-    let app = synapse_registrar_api::create_router(registry);
+    let app = registrar_api::create_router(registry);
 
     // Start the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));

@@ -11,6 +11,7 @@
 //!    - DELETE /modules/:name - Remove module
 //!    - GET /modules/:name/status - Get status
 //!    - PUT /modules/:name/status - Update status
+//!    - POST /modules/:name/start - Start module
 //!
 //! 2. Request/Response Handling
 //!    - Input validation
@@ -43,8 +44,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use synapse_registrar::{
-    LocalRegistry, ModuleConfig, ModuleStatus, ModuleType, RegistryError, Registry,
+use registrar::{
+    Module, ModuleType, ModuleStatus,
+    LocalRegistry, RegistryError,
 };
 use thiserror::Error;
 use tower_http::trace::TraceLayer;
@@ -100,20 +102,18 @@ struct CreateModuleRequest {
 // State type for sharing the registry across handlers
 #[derive(Clone)]
 struct AppState {
-    registry: Arc<dyn Registry>,
+    registry: Arc<LocalRegistry>,
 }
 
 // API handlers
-async fn list_modules(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<ModuleResponse>>> {
+async fn list_modules(State(state): State<AppState>) -> Result<Json<Vec<ModuleResponse>>> {
     let modules = state.registry.list_modules().await?;
     let response = modules
         .into_iter()
-        .map(|config| ModuleResponse {
-            name: config.name,
-            status: config.status,
-            module_type: config.module_type,
+        .map(|m| ModuleResponse {
+            name: m.name,
+            status: m.status,
+            module_type: m.module_type,
         })
         .collect();
     Ok(Json(response))
@@ -123,11 +123,11 @@ async fn get_module(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<ModuleResponse>> {
-    let config = state.registry.get_module(&name).await?;
+    let module = state.registry.get_module(&name).await?;
     Ok(Json(ModuleResponse {
-        name: config.name,
-        status: config.status,
-        module_type: config.module_type,
+        name: module.name,
+        status: module.status,
+        module_type: module.module_type,
     }))
 }
 
@@ -135,29 +135,21 @@ async fn create_module(
     State(state): State<AppState>,
     Json(request): Json<CreateModuleRequest>,
 ) -> Result<StatusCode> {
-    let config = ModuleConfig::new(request.name, request.module_type);
-    state.registry.register_module(config).await?;
+    let module = Module {
+        name: request.name.clone(),
+        module_type: request.module_type,
+        status: ModuleStatus::new(),
+    };
+    state.registry.register_module(module).await?;
     Ok(StatusCode::CREATED)
-}
-
-async fn update_module(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-    Json(request): Json<CreateModuleRequest>,
-) -> Result<StatusCode> {
-    let mut config = state.registry.get_module(&name).await?;
-    config.name = request.name;
-    config.module_type = request.module_type;
-    state.registry.update_module(&name, config).await?;
-    Ok(StatusCode::OK)
 }
 
 async fn delete_module(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<StatusCode> {
-    state.registry.remove_module(&name).await?;
-    Ok(StatusCode::NO_CONTENT)
+    state.registry.unregister_module(&name).await?;
+    Ok(StatusCode::OK)
 }
 
 async fn get_module_status(
@@ -173,13 +165,22 @@ async fn update_module_status(
     Path(name): Path<String>,
     Json(status): Json<ModuleStatus>,
 ) -> Result<StatusCode> {
-    let mut config = state.registry.get_module(&name).await?;
-    config.status = status;
-    state.registry.update_module(&name, config).await?;
+    let mut module = state.registry.get_module(&name).await?;
+    module.status = status;
+    state.registry.register_module(module).await?;
     Ok(StatusCode::OK)
 }
 
-pub fn create_router(registry: impl Registry + 'static) -> Router {
+async fn start_module(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<StatusCode> {
+    let module = state.registry.get_module(&name).await?;
+    state.registry.start_module(&name).await?;
+    Ok(StatusCode::OK)
+}
+
+pub fn create_router(registry: LocalRegistry) -> Router {
     let state = AppState {
         registry: Arc::new(registry),
     };
@@ -188,17 +189,19 @@ pub fn create_router(registry: impl Registry + 'static) -> Router {
         .route("/modules", get(list_modules).post(create_module))
         .route(
             "/modules/:name",
-            get(get_module)
-                .put(update_module)
-                .delete(delete_module),
+            get(get_module).delete(delete_module),
         )
         .route(
             "/modules/:name/status",
             get(get_module_status).put(update_module_status),
         )
+        .route("/modules/:name/start", axum::routing::post(start_module))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
+
+pub mod client;
+pub use client::{RegistrarClient, ClientError};
 
 #[cfg(test)]
 mod tests {

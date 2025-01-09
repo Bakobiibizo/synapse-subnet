@@ -1,22 +1,27 @@
 [package]
-name = "synapse-registrar-api"
+name = "registrar-api"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-synapse-registrar = { path = "../registrar" }
-axum = "0.7"
+registrar = { path = "../registrar" }
+axum = { version = "0.6", features = ["headers"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-tower-http = { version = "0.5", features = ["trace"] }
+tower-http = { version = "0.4", features = ["trace"] }
 tower = { version = "0.4", features = ["util"] }
 thiserror = "1.0"
 async-trait = "0.1"
 hyper = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+wiremock = "0.5"
 
 [[bin]]
-name = "synapse-registrar-api"
+name = "registrar-api"
 path = "src/main.rs"
