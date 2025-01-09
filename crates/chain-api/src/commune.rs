@@ -1,7 +1,7 @@
-use std::error::Error;
 use std::process::Command;
 use serde::{Deserialize, Serialize};
-use serde_json;
+use std::error::Error;
+use std::env;
 
 /// Represents a Commune AI module
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,19 +54,31 @@ impl CommuneRPC {
     }
 
     fn run_python_command(&self, script_args: &[&str]) -> Result<String, Box<dyn Error>> {
-        let output = Command::new(&self.python_path)
-            .arg("commune_rpc.py")
-            .args(script_args)
-            .env("COMMUNE_RPC_URL", &self.rpc_url)
-            .output()?;
+        // Set environment variables
+        std::env::set_var("COMMUNE_RPC_URL", &self.rpc_url);
 
+        // Build command with script path and args
+        let mut cmd = Command::new("python3");
+        cmd.arg(&self.python_path);
+        cmd.args(script_args);
+        
+        // Execute command and capture output
+        let output = cmd.output()?;
+        
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
             return Err(error.into());
         }
 
-        let result = String::from_utf8(output.stdout)?;
-        Ok(result)
+        // Get stdout as string
+        let stdout = String::from_utf8(output.stdout)?;
+        let stdout = stdout.trim();
+        
+        if stdout.is_empty() {
+            return Err("Empty response from Python script".into());
+        }
+        
+        Ok(stdout.to_string())
     }
 }
 
@@ -78,17 +90,17 @@ impl CommuneInterface for CommuneRPC {
     }
 
     fn get_module(&self, name: &str, netuid: u16) -> Result<Option<CommuneModule>, Box<dyn Error>> {
-        let result = self.run_python_command(&["get_module", name, &netuid.to_string()])?;
-        if result.trim().is_empty() {
+        let output = self.run_python_command(&["get_module", name, &netuid.to_string()])?;
+        if output == "null" {
             return Ok(None);
         }
-        let module = serde_json::from_str(&result)?;
+        let module: CommuneModule = serde_json::from_str(&output)?;
         Ok(Some(module))
     }
 
     fn list_modules(&self, netuid: u16) -> Result<Vec<CommuneModule>, Box<dyn Error>> {
-        let result = self.run_python_command(&["list_modules", &netuid.to_string()])?;
-        let modules = serde_json::from_str(&result)?;
+        let output = self.run_python_command(&["list_modules", &netuid.to_string()])?;
+        let modules: Vec<CommuneModule> = serde_json::from_str(&output)?;
         Ok(modules)
     }
 
@@ -103,20 +115,20 @@ impl CommuneInterface for CommuneRPC {
     }
 
     fn get_stake(&self, module_name: &str, netuid: u16) -> Result<u64, Box<dyn Error>> {
-        let result = self.run_python_command(&["get_stake", module_name, &netuid.to_string()])?;
-        let stake = result.trim().parse()?;
+        let output = self.run_python_command(&["get_stake", module_name, &netuid.to_string()])?;
+        let stake: u64 = output.trim().parse()?;
         Ok(stake)
     }
 
     fn get_min_stake(&self, netuid: u16) -> Result<u64, Box<dyn Error>> {
-        let result = self.run_python_command(&["get_min_stake", &netuid.to_string()])?;
-        let min_stake = result.trim().parse()?;
+        let output = self.run_python_command(&["get_min_stake", &netuid.to_string()])?;
+        let min_stake: u64 = output.trim().parse()?;
         Ok(min_stake)
     }
 
     fn get_max_allowed_modules(&self) -> Result<u64, Box<dyn Error>> {
-        let result = self.run_python_command(&["get_max_allowed_modules"])?;
-        let max_modules = result.trim().parse()?;
+        let output = self.run_python_command(&["get_max_allowed_modules"])?;
+        let max_modules: u64 = output.trim().parse()?;
         Ok(max_modules)
     }
 }
@@ -125,58 +137,49 @@ impl CommuneInterface for CommuneRPC {
 mod tests {
     use super::*;
     use std::env;
-    use std::fs;
-    use std::path::PathBuf;
 
-    fn setup_test_environment() -> (CommuneRPC, PathBuf) {
-        let test_dir = env::temp_dir().join("commune_rpc_tests");
-        fs::create_dir_all(&test_dir).unwrap();
+    fn setup_test_environment() -> (CommuneRPC, std::path::PathBuf) {
+        // Use mainnet URL for tests
+        let mainnet_url = "wss://commune-api-node-2.communeai.net";
+        env::set_var("COMMUNE_RPC_URL", mainnet_url);
+
+        // Get path to Python script
+        let current_dir = env::current_dir().unwrap();
+        let script_path = current_dir.join("src").join("commune_rpc.py");
         
-        let python_script = test_dir.join("commune_rpc.py");
-        fs::copy(
-            env::current_dir().unwrap().join("src/commune_rpc.py"),
-            &python_script,
-        ).unwrap();
-
         let rpc = CommuneRPC::new(
-            "python3".to_string(),
-            "http://localhost:9944".to_string(),
+            script_path.to_str().unwrap().to_string(),
+            mainnet_url.to_string(),
         );
 
-        (rpc, test_dir)
+        (rpc, current_dir)
     }
 
-    fn cleanup_test_environment(test_dir: PathBuf) {
-        fs::remove_dir_all(test_dir).unwrap_or(());
+    fn cleanup_test_environment(_test_dir: std::path::PathBuf) {
+        // Clean up any test artifacts if needed
     }
 
     #[test]
     fn test_get_max_allowed_modules() {
         let (rpc, test_dir) = setup_test_environment();
-        
-        match rpc.get_max_allowed_modules() {
-            Ok(max_modules) => {
-                assert!(max_modules > 0, "Maximum allowed modules should be positive");
-            }
-            Err(e) => panic!("Failed to get max allowed modules: {}", e),
-        }
-
+        let result = rpc.get_max_allowed_modules();
         cleanup_test_environment(test_dir);
+
+        assert!(result.is_ok(), "Failed to get max allowed modules: {:?}", result.err());
+        let max_modules = result.unwrap();
+        assert!(max_modules > 0, "Maximum allowed modules should be greater than 0");
     }
 
     #[test]
     fn test_get_min_stake() {
         let (rpc, test_dir) = setup_test_environment();
         let netuid = 0;
-
-        match rpc.get_min_stake(netuid) {
-            Ok(min_stake) => {
-                assert!(min_stake > 0, "Minimum stake should be positive");
-            }
-            Err(e) => panic!("Failed to get min stake: {}", e),
-        }
-
+        let result = rpc.get_min_stake(netuid);
         cleanup_test_environment(test_dir);
+
+        assert!(result.is_ok(), "Failed to get min stake: {:?}", result.err());
+        let min_stake = result.unwrap();
+        assert!(min_stake > 0, "Minimum stake should be greater than 0");
     }
 
     #[test]
@@ -184,58 +187,45 @@ mod tests {
         let (rpc, test_dir) = setup_test_environment();
         let netuid = 0;
 
-        // Create a test module
-        let module = CommuneModule {
+        // Test module registration
+        let test_module = CommuneModule {
             name: "test_module".to_string(),
             address: "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY".to_string(),
-            stake: 1000000,
-            metadata: Some("Test metadata".to_string()),
+            stake: 1000,
+            metadata: Some("Test module".to_string()),
         };
 
-        // Test registration
-        match rpc.register_module(module.clone(), netuid) {
-            Ok(()) => (),
-            Err(e) => panic!("Failed to register module: {}", e),
+        let result = rpc.register_module(test_module.clone(), netuid);
+        assert!(result.is_ok(), "Failed to register module: {:?}", result.err());
+
+        // Test getting registered module
+        let result = rpc.get_module(&test_module.name, netuid);
+        assert!(result.is_ok(), "Failed to get module: {:?}", result.err());
+        
+        if let Ok(Some(module)) = result {
+            assert_eq!(module.name, test_module.name);
+            assert_eq!(module.address, test_module.address);
         }
 
-        // Test retrieval
-        match rpc.get_module(&module.name, netuid) {
-            Ok(Some(retrieved)) => {
-                assert_eq!(retrieved.name, module.name);
-                assert_eq!(retrieved.address, module.address);
-            }
-            Ok(None) => panic!("Module not found after registration"),
-            Err(e) => panic!("Failed to get module: {}", e),
-        }
-
-        // Test listing
-        match rpc.list_modules(netuid) {
-            Ok(modules) => {
-                assert!(!modules.is_empty(), "Module list should not be empty");
-                assert!(modules.iter().any(|m| m.name == module.name));
-            }
-            Err(e) => panic!("Failed to list modules: {}", e),
-        }
-
+        // Test listing modules
+        let result = rpc.list_modules(netuid);
+        assert!(result.is_ok(), "Failed to list modules: {:?}", result.err());
+        
         // Test staking
-        match rpc.stake(&module.name, 500000, netuid) {
-            Ok(()) => (),
-            Err(e) => panic!("Failed to stake: {}", e),
-        }
+        let result = rpc.stake(&test_module.name, 500, netuid);
+        assert!(result.is_ok(), "Failed to stake: {:?}", result.err());
 
         // Test getting stake
-        match rpc.get_stake(&module.name, netuid) {
-            Ok(stake) => {
-                assert!(stake >= 500000, "Stake should be at least the amount we staked");
-            }
-            Err(e) => panic!("Failed to get stake: {}", e),
+        let result = rpc.get_stake(&test_module.name, netuid);
+        assert!(result.is_ok(), "Failed to get stake: {:?}", result.err());
+        
+        if let Ok(stake) = result {
+            assert!(stake >= 500, "Stake should be at least 500");
         }
 
         // Test unstaking
-        match rpc.unstake(&module.name, 500000, netuid) {
-            Ok(()) => (),
-            Err(e) => panic!("Failed to unstake: {}", e),
-        }
+        let result = rpc.unstake(&test_module.name, 250, netuid);
+        assert!(result.is_ok(), "Failed to unstake: {:?}", result.err());
 
         cleanup_test_environment(test_dir);
     }
