@@ -1,5 +1,5 @@
 [package]
-name = "synapse-subnet"
+name = "subnet"
 version = "0.1.0"
 edition = "2021"
 authors = ["Synapse Team"]
@@ -26,4 +26,5 @@ members = [
     "crates/registrar-api",
     "crates/docker-manager",
     "crates/chain-api",
+    "crates/validator",
 ]
