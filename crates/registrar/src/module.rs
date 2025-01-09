@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::error::Error;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use synapse_docker_manager::{ContainerStatus, HealthCheckConfig};
+use docker_manager::{ContainerStatus, HealthCheckConfig};
 
 /// Represents a module's implementation type
 #[derive(Debug, Clone, Serialize, Deserialize)]

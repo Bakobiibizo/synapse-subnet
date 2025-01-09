@@ -4,9 +4,9 @@
 //! inference modules, supporting both Docker-based and native implementations.
 
 pub mod interface;
-mod module;
-mod registry;
-mod docker;
+pub mod module;
+pub mod registry;
+pub mod docker;
 pub mod verification;
 
 pub use interface::{

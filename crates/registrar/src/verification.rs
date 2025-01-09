@@ -219,7 +219,7 @@ impl ModuleVerifier {
     }
 
     /// Verify health check configuration
-    fn verify_health_check(&self, health_check: &Option<synapse_docker_manager::HealthCheckConfig>)
+    fn verify_health_check(&self, health_check: &Option<docker_manager::HealthCheckConfig>)
         -> Result<(), VerificationError>
     {
         if let Some(health_check) = health_check {
@@ -296,7 +296,7 @@ mod tests {
                 volumes: Some(std::collections::HashMap::from([
                     ("/data/test".to_string(), "/usr/share/nginx/html".to_string()),
                 ])),
-                health_check: Some(synapse_docker_manager::HealthCheckConfig {
+                health_check: Some(docker_manager::HealthCheckConfig {
                     test: vec!["CMD".to_string(), "curl".to_string(), "-f".to_string(), "http://localhost/health".to_string()],
                     interval: 30000000000,
                     timeout: 5000000000,

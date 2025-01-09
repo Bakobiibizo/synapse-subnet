@@ -62,11 +62,19 @@ impl LocalRegistry {
 
     /// Unregister a module from the registry
     pub async fn unregister_module(&self, name: &str) -> Result<(), RegistryError> {
-        if let Some(_module) = self.modules.write().await.remove(name) {
-            Ok(())
-        } else {
-            Err(RegistryError::ModuleNotFound(name.to_string()))
+        let mut modules = self.modules.write().await;
+        let mut runtimes = self.runtimes.write().await;
+
+        // Try to stop the module first
+        if let Some(runtime) = runtimes.get(name) {
+            let _ = runtime.stop().await;
         }
+
+        // Remove from both maps
+        modules.remove(name);
+        runtimes.remove(name);
+
+        Ok(())
     }
 
     /// Start a module
@@ -115,6 +123,12 @@ impl LocalRegistry {
         } else {
             Err(RegistryError::ModuleNotFound(name.to_string()))
         }
+    }
+
+    /// Get all module names
+    pub async fn get_module_names(&self) -> Vec<String> {
+        let modules = self.modules.read().await;
+        modules.keys().cloned().collect()
     }
 
     /// List all modules in the registry

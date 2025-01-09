@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::error::Error;
 use async_trait::async_trait;
-use synapse_docker_manager::{ContainerManager, DockerManager, ContainerState, ContainerConfig};
+use docker_manager::{ContainerManager, DockerManager, ContainerState, ContainerConfig};
 use thiserror::Error;
 
 /// Runtime implementation for Docker-based modules.
@@ -85,12 +85,7 @@ impl ModuleRuntime for DockerModuleRuntime {
     }
 
     async fn stop(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let _ = self.manager
-            .stop_container(&self.module.name)
-            .await
-            .map_err(|e| Box::new(DockerRuntimeError::Docker(e)) as Box<dyn Error + Send + Sync>);
-
-        Ok(())
+        self.cleanup().await
     }
 
     async fn status(&self) -> Result<ModuleStatus, Box<dyn Error + Send + Sync>> {
@@ -112,7 +107,7 @@ impl ModuleRuntime for DockerModuleRuntime {
 #[derive(Debug, Error)]
 pub enum DockerRuntimeError {
     #[error("Docker error: {0}")]
-    Docker(#[from] synapse_docker_manager::DockerError),
+    Docker(#[from] docker_manager::DockerError),
     #[error("Invalid module type")]
     InvalidModuleType,
 }
