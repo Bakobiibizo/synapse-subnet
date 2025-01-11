@@ -1,5 +1,4 @@
 use crate::module::{Module, ModuleType};
-use std::error::Error;
 use thiserror::Error;
 use url::Url;
 use std::collections::HashSet;

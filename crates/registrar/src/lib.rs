@@ -8,6 +8,8 @@ pub mod module;
 pub mod registry;
 pub mod docker;
 pub mod verification;
+pub mod commands;
+pub mod api;
 
 pub use interface::{
     Health, HealthStatus, InferenceModule, InferenceParameters,

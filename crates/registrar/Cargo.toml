@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
+git2 = "0.18"
+tempfile = "3.8"
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -12,10 +16,12 @@ thiserror = "1.0"
 tracing = "0.1"
 pyo3 = { version = "0.19", features = ["auto-initialize"] }
 docker-manager = { path = "../docker-manager" }
-url = "2.5.0"
+url = "2.4"
+dialoguer = "0.11"
+axum = "0.7"
+tower-http = { version = "0.5", features = ["trace", "fs"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = "0.11"
 assert_matches = "1.5"
-tempfile = "3.8"

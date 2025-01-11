@@ -1,0 +1,21 @@
+registrar:
+  endpoint: "http://localhost:8080"
+  modules:
+    - name: "zangief"
+      type: "docker"
+      image: "zangief"
+      tag: "latest"
+      port: 8081
+      env:
+        OPENAI_API_KEY: "${OPENAI_API_KEY}"
+        ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+        HUGGINGFACE_API_KEY: "${HUGGINGFACE_API_KEY}"
+        VALIDATOR_KEY: "${VALIDATOR_KEY}"
+        VALIDATOR_PORT: "8081"
+      volumes:
+        - "${PWD}/.zangief:/app"
+
+validator:
+  port: 8082
+  key: "${VALIDATOR_KEY}"
+  chain_endpoint: "http://localhost:8083"

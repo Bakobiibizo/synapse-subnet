@@ -1,9 +1,14 @@
 .commune-env/
+.zangief/
 testing.py
 inspect_commune.py
 subspace_output.md
 **/PROGRESS.md
 **/__pycache__
+
+!crates/registrar/config/.gitkeep
+crates/registrar/config/*
+
 
 /target
 
