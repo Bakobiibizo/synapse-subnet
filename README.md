@@ -8,11 +8,21 @@ The Synapse Subnet project provides a flexible and modular framework for impleme
 
 ## Components
 
+### Core Services
+
 - **Validator**: Handles request validation, load balancing, and result verification
 - **Miner**: Manages model serving and inference execution
 - **Registrar**: Provides module registry and build system
+  - SQLite-based module storage
+  - Docker-based module runtime
+  - Module verification and security checks
 - **Chain API**: Manages blockchain integration with support for Commune and Subspace networks
-- **GUI**: (Future) Provides monitoring and management interface
+
+### Supporting Libraries
+
+- **registrar-core**: Core types and traits for the registrar service
+- **registrar-api**: Client library for interacting with the registrar service
+- **docker-manager**: Docker container management utilities
 
 ## Getting Started
 
@@ -22,6 +32,7 @@ The Synapse Subnet project provides a flexible and modular framework for impleme
 - Python 3.10 or later
 - Docker
 - Git
+- SQLite 3
 
 ### Installation
 
@@ -40,23 +51,48 @@ cargo build
 
 # Run tests
 cargo test
+
+# Start the registrar service
+cargo run -p registrar -- serve --port 8082
 ```
 
 ## Features
 
-- **Blockchain Integration**
-  - Commune network support for module registration and staking
-  - Subspace network integration for data storage and retrieval
-  - Comprehensive test suite for network operations
+### Blockchain Integration
+- Commune network support for module registration and staking
+- Subspace network integration for data storage and retrieval
+- Comprehensive test suite for network operations
 
-- **Module Management**
-  - Module registration and discovery
-  - Stake management with minimum stake requirements
-  - Permission-based access control
+### Module Management
+- Module registration and discovery via REST API
+- SQLite-based persistent storage
+- Docker-based module runtime environment
+- Module verification and security checks
+- Permission-based access control
+
+### Development Tools
+- CLI tools for module management
+- Client library for service integration
+- Comprehensive documentation and examples
+
+## Architecture
+
+Each component has its own architecture documentation:
+- [Registrar Architecture](crates/registrar/ARCHITECTURE.md)
+- [Validator Architecture](crates/validator/ARCHITECTURE.md)
+- [Docker Manager](crates/docker-manager/ARCHITECTURE.md)
 
 ## Development
 
-See [PROGRESS.md](PROGRESS.md) for current development status and roadmap.
+The project is under active development. Key features and improvements:
+
+- [x] SQLite-based module registry
+- [x] Docker runtime integration
+- [x] Basic module verification
+- [ ] Advanced security checks
+- [ ] GUI interface
+- [ ] Module versioning
+- [ ] Dependency management
 
 ## License
 
