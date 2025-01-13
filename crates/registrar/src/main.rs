@@ -1,10 +1,13 @@
 use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
+use std::net::SocketAddr;
 use registrar_core::{ModuleType, ModuleStatus};
 use time::OffsetDateTime;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, util::SubscriberInitExt};
+use std::os::unix::fs::PermissionsExt;
+use crate::api::modules;
 
 const CONFIG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config");
 
