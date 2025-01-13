@@ -26,12 +26,21 @@ pub use registry::{Registry, RegistryError};
 pub use docker::DockerModuleRuntime;
 pub use verification::{ModuleVerifier, VerificationConfig, VerificationError};
 
+/// Registrar service for managing subnet modules.
+/// This service provides functionality for registering, managing, and retrieving
+/// subnet modules. It uses SQLite for persistent storage and provides a REST API
+/// for module management.
 pub struct Registrar {
     db: SqlitePool,
     config_dir: PathBuf,
 }
 
 impl Registrar {
+    /// Creates a new Registrar instance
+    /// 
+    /// # Arguments
+    /// * `db_url` - SQLite connection URL
+    /// * `config_dir` - Directory for storing module configurations
     pub async fn new(db_url: &str, config_dir: impl Into<PathBuf>) -> Result<Self> {
         let db = SqlitePool::connect(db_url).await?;
         Ok(Self {
@@ -40,10 +49,12 @@ impl Registrar {
         })
     }
 
+    /// Returns a reference to the database connection pool
     pub fn db(&self) -> &SqlitePool {
         &self.db
     }
 
+    /// Returns a reference to the config directory path
     pub fn config_dir(&self) -> &PathBuf {
         &self.config_dir
     }

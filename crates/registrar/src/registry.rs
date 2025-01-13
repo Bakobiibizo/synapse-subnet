@@ -50,12 +50,25 @@ pub struct ModulePackage {
     pub metadata: RegistryModule,
 }
 
+/// Registry handles all database operations for subnet modules.
+/// It provides a high-level interface for managing module registration,
+/// status updates, and metadata.
 pub struct Registry {
     db: SqlitePool,
     config_dir: PathBuf,
 }
 
 impl Registry {
+    /// Creates a new Registry instance with the specified database URL and config directory.
+    /// 
+    /// # Arguments
+    /// * `db_url` - SQLite database URL with proper connection options
+    /// * `config_dir` - Directory for storing module configurations
+    /// 
+    /// # Example
+    /// ```no_run
+    /// let registry = Registry::new("sqlite:data/registrar.db", "/path/to/config").await?;
+    /// ```
     pub async fn new(db_url: &str, config_dir: impl Into<PathBuf>) -> Result<Self> {
         // Create database directory if it doesn't exist
         let db_path = PathBuf::from(db_url.trim_start_matches("sqlite:"));
@@ -90,14 +103,23 @@ impl Registry {
         })
     }
 
+    /// Returns a reference to the config directory path
     pub fn config_dir(&self) -> &PathBuf {
         &self.config_dir
     }
 
+    /// Returns a reference to the database connection pool
     pub fn db(&self) -> &SqlitePool {
         &self.db
     }
 
+    /// Creates a new module in the registry
+    /// 
+    /// # Arguments
+    /// * `module` - Module metadata to store
+    /// 
+    /// # Returns
+    /// The ID of the newly created module
     pub async fn create_module(&self, module: &RegistryModule) -> Result<i64> {
         let result = sqlx::query(
             r#"
@@ -128,6 +150,13 @@ impl Registry {
         Ok(id)
     }
 
+    /// Retrieves a module from the registry by name
+    /// 
+    /// # Arguments
+    /// * `name` - Name of the module to retrieve
+    /// 
+    /// # Returns
+    /// The module metadata if found, or `None` if not found
     pub async fn get_module(&self, name: &str) -> Result<Option<RegistryModule>> {
         let module = sqlx::query_as::<_, RegistryModule>(
             r#"
@@ -157,6 +186,10 @@ impl Registry {
         Ok(module)
     }
 
+    /// Lists all modules in the registry
+    /// 
+    /// # Returns
+    /// A vector of module metadata
     pub async fn list_modules(&self) -> Result<Vec<RegistryModule>> {
         let modules = sqlx::query_as::<_, RegistryModule>(
             r#"
@@ -184,6 +217,10 @@ impl Registry {
         Ok(modules)
     }
 
+    /// Increments the download count for a module
+    /// 
+    /// # Arguments
+    /// * `name` - Name of the module to increment downloads for
     pub async fn increment_downloads(&self, name: &str) -> Result<()> {
         sqlx::query(
             r#"
@@ -198,6 +235,13 @@ impl Registry {
         Ok(())
     }
 
+    /// Retrieves a module package from the registry
+    /// 
+    /// # Arguments
+    /// * `name` - Name of the module to retrieve the package for
+    /// 
+    /// # Returns
+    /// The module package metadata
     pub async fn get_package(&self, name: &str) -> Result<ModulePackage> {
         let module = self.get_module(name).await?
             .ok_or_else(|| RegistryError::ModuleNotFound(name.to_string()))?;
@@ -236,10 +280,12 @@ pub struct RegistryModule {
 }
 
 impl RegistryModule {
+    /// Returns the module type as an enum
     pub fn get_module_type(&self) -> ModuleType {
         ModuleType::from_str(&self.module_type).unwrap_or(ModuleType::Observer)
     }
 
+    /// Returns the module status as an enum
     pub fn get_status(&self) -> ModuleStatus {
         ModuleStatus::from_str(&self.status).unwrap_or(ModuleStatus::Stopped)
     }
