@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
-use docker_manager::{ContainerManager, ContainerStatus, ContainerState, DockerError};
-use registrar::module::{Module, ModuleStatus};
+use docker_manager::{ContainerManager, DockerError};
+use registrar::module::Module;
 use registrar_api::client::{RegistrarClientTrait, ClientError as RegistrarError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -230,12 +230,16 @@ impl SubnetInjector {
 
 /// Manages the validator's modules and subnet configurations
 pub struct ValidatorManager {
+    #[allow(dead_code)]
     docker: Arc<dyn ContainerManager>,
     registrar: Box<dyn RegistrarClientTrait>,
     subnet_modules: RwLock<HashMap<String, Module>>,
+    #[allow(dead_code)]
     module_configs: RwLock<HashMap<String, ModuleConfig>>,
     response_logger: Arc<DefaultResponseLogger>,
+    #[allow(dead_code)]
     response_tracker: Arc<ResponseTracker>,
+    #[allow(dead_code)]
     subnet_injector: SubnetInjector,
 }
 

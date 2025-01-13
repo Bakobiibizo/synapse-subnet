@@ -1,8 +1,7 @@
-use crate::{CreateModuleRequest, Module, ModuleStatus, ModuleType};
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use reqwest::{Client, StatusCode};
+use serde::{Serialize, Deserialize};
 use thiserror::Error;
-use async_trait::async_trait;
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -10,229 +9,177 @@ pub enum ClientError {
     Http(#[from] reqwest::Error),
     #[error("Module not found: {0}")]
     ModuleNotFound(String),
-    #[error("Module already exists: {0}")]
-    ModuleExists(String),
-    #[error("Invalid request: {0}")]
-    BadRequest(String),
-    #[error("Internal server error: {0}")]
-    Internal(String),
+    #[error("Invalid response: {0}")]
+    InvalidResponse(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ModuleResponse {
-    name: String,
-    status: ModuleStatus,
-    #[serde(rename = "type")]
-    module_type: ModuleType,
+pub struct Module {
+    pub id: i64,
+    pub name: String,
+    pub version: String,
+    pub status: ModuleStatus,
 }
 
-#[async_trait]
-pub trait RegistrarClientTrait: Send + Sync {
-    async fn register_module(&self, module: Module) -> Result<(), ClientError>;
-    async fn start_module(&self, name: &str) -> Result<(), ClientError>;
-    async fn unregister_module(&self, name: &str) -> Result<(), ClientError>;
-    async fn get_module_status(&self, name: &str) -> Result<ModuleStatus, ClientError>;
-    async fn update_module_status(&self, name: &str, status: ModuleStatus) -> Result<(), ClientError>;
-    async fn register_miner(&self, uid: &str, key: &str, name: &str) -> Result<(), ClientError>;
-    async fn list_modules(&self) -> Result<Vec<Module>, ClientError>;
-    fn clone_box(&self) -> Box<dyn RegistrarClientTrait>;
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ModuleStatus {
+    pub state: ModuleState,
+    pub health: Option<String>,
+    pub error: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum ModuleState {
+    Created,
+    Running,
+    Stopped,
+    Failed,
+}
+
 pub struct RegistrarClient {
     client: Client,
     base_url: String,
 }
 
 impl RegistrarClient {
-    pub fn new(base_url: String) -> Self {
-        Self {
-            client: Client::new(),
-            base_url,
-        }
+    pub fn new(base_url: &str) -> Result<Self, ClientError> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?;
+        
+        Ok(Self {
+            client,
+            base_url: base_url.to_string(),
+        })
     }
-}
 
-#[async_trait]
-impl RegistrarClientTrait for RegistrarClient {
-    async fn register_module(&self, module: Module) -> Result<(), ClientError> {
-        let request = CreateModuleRequest {
-            name: module.name.clone(),
-            module_type: module.module_type,
-        };
-
-        let response = self
-            .client
-            .post(&format!("{}/modules", self.base_url))
-            .json(&request)
+    pub async fn list_modules(&self) -> Result<Vec<Module>, ClientError> {
+        let response = self.client
+            .get(&format!("{}/modules", self.base_url))
             .send()
             .await?;
 
         match response.status() {
-            reqwest::StatusCode::CREATED => Ok(()),
-            reqwest::StatusCode::BAD_REQUEST => {
-                let error = response.text().await?;
-                Err(ClientError::BadRequest(error))
-            }
-            reqwest::StatusCode::CONFLICT => {
-                Err(ClientError::ModuleExists(module.name))
-            }
-            _ => {
-                let error = response.text().await?;
-                Err(ClientError::Internal(error))
-            }
+            StatusCode::OK => {
+                let modules = response.json().await?;
+                Ok(modules)
+            },
+            status => Err(ClientError::InvalidResponse(format!(
+                "Unexpected status code: {}", status
+            ))),
         }
     }
 
-    async fn unregister_module(&self, name: &str) -> Result<(), ClientError> {
-        let response = self
-            .client
-            .delete(&format!("{}/modules/{}", self.base_url, name))
+    pub async fn get_module(&self, name: &str) -> Result<Module, ClientError> {
+        let response = self.client
+            .get(&format!("{}/modules/{}", self.base_url, name))
             .send()
             .await?;
 
         match response.status() {
-            reqwest::StatusCode::NO_CONTENT => Ok(()),
-            reqwest::StatusCode::NOT_FOUND => {
+            StatusCode::OK => {
+                let module = response.json().await?;
+                Ok(module)
+            },
+            StatusCode::NOT_FOUND => {
                 Err(ClientError::ModuleNotFound(name.to_string()))
-            }
-            _ => {
-                let error = response.text().await?;
-                Err(ClientError::Internal(error))
-            }
+            },
+            status => Err(ClientError::InvalidResponse(format!(
+                "Unexpected status code: {}", status
+            ))),
         }
     }
 
-    async fn get_module_status(&self, name: &str) -> Result<ModuleStatus, ClientError> {
-        let response = self
-            .client
+    pub async fn create_module(&self, module: &Module) -> Result<i64, ClientError> {
+        let response = self.client
+            .post(&format!("{}/modules", self.base_url))
+            .json(&module)
+            .send()
+            .await?;
+
+        match response.status() {
+            StatusCode::CREATED => {
+                let id = response.json().await?;
+                Ok(id)
+            },
+            status => Err(ClientError::InvalidResponse(format!(
+                "Unexpected status code: {}", status
+            ))),
+        }
+    }
+
+    pub async fn get_module_status(&self, name: &str) -> Result<ModuleStatus, ClientError> {
+        let response = self.client
             .get(&format!("{}/modules/{}/status", self.base_url, name))
             .send()
             .await?;
 
         match response.status() {
-            reqwest::StatusCode::OK => {
-                let status = response.json::<ModuleStatus>().await?;
+            StatusCode::OK => {
+                let status = response.json().await?;
                 Ok(status)
-            }
-            reqwest::StatusCode::NOT_FOUND => {
+            },
+            StatusCode::NOT_FOUND => {
                 Err(ClientError::ModuleNotFound(name.to_string()))
-            }
-            _ => {
-                let error = response.text().await?;
-                Err(ClientError::Internal(error))
-            }
+            },
+            status => Err(ClientError::InvalidResponse(format!(
+                "Unexpected status code: {}", status
+            ))),
         }
     }
 
-    async fn update_module_status(&self, name: &str, status: ModuleStatus) -> Result<(), ClientError> {
-        let response = self
-            .client
+    pub async fn update_module_status(&self, name: &str, status: &ModuleStatus) -> Result<(), ClientError> {
+        let response = self.client
             .put(&format!("{}/modules/{}/status", self.base_url, name))
             .json(&status)
             .send()
             .await?;
 
         match response.status() {
-            reqwest::StatusCode::NO_CONTENT => Ok(()),
-            reqwest::StatusCode::NOT_FOUND => {
+            StatusCode::OK => Ok(()),
+            StatusCode::NOT_FOUND => {
                 Err(ClientError::ModuleNotFound(name.to_string()))
-            }
-            _ => {
-                let error = response.text().await?;
-                Err(ClientError::Internal(error))
-            }
+            },
+            status => Err(ClientError::InvalidResponse(format!(
+                "Unexpected status code: {}", status
+            ))),
         }
-    }
-
-    async fn start_module(&self, name: &str) -> Result<(), ClientError> {
-        let response = self
-            .client
-            .post(&format!("{}/modules/{}/start", self.base_url, name))
-            .send()
-            .await?;
-
-        match response.status() {
-            reqwest::StatusCode::NO_CONTENT => Ok(()),
-            reqwest::StatusCode::NOT_FOUND => {
-                Err(ClientError::ModuleNotFound(name.to_string()))
-            }
-            _ => {
-                let error = response.text().await?;
-                Err(ClientError::Internal(error))
-            }
-        }
-    }
-
-    async fn register_miner(&self, uid: &str, key: &str, name: &str) -> Result<(), ClientError> {
-        // TODO: implement register_miner
-        unimplemented!()
-    }
-
-    async fn list_modules(&self) -> Result<Vec<Module>, ClientError> {
-        let url = format!("{}/modules", self.base_url);
-        let response = self.client.get(&url).send().await?;
-        
-        if !response.status().is_success() {
-            return Err(ClientError::Internal("Failed to list modules".to_string()));
-        }
-        
-        let modules: Vec<ModuleResponse> = response.json().await?;
-        Ok(modules.into_iter().map(|m| Module {
-            name: m.name,
-            status: m.status,
-            module_type: m.module_type,
-        }).collect())
-    }
-
-    fn clone_box(&self) -> Box<dyn RegistrarClientTrait> {
-        Box::new(self.clone())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::{
-        matchers::{method, path},
-        Mock, MockServer, ResponseTemplate,
-    };
+    use reqwest::StatusCode;
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::{method, path};
 
     #[tokio::test]
-    async fn test_register_module() {
+    async fn test_create_module() {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("POST"))
             .and(path("/modules"))
-            .respond_with(ResponseTemplate::new(201))
+            .respond_with(ResponseTemplate::new(StatusCode::CREATED.as_u16())
+                .set_body_json(json!(1)))
             .mount(&mock_server)
             .await;
 
-        let client = RegistrarClient::new(mock_server.uri());
+        let client = RegistrarClient::new(&mock_server.uri()).unwrap();
 
         let module = Module {
+            id: 0,
             name: "test".to_string(),
-            module_type: ModuleType::Subnet,
-            status: ModuleStatus::Stopped,
+            version: "1.0.0".to_string(),
+            status: ModuleStatus {
+                state: ModuleState::Created,
+                health: None,
+                error: None,
+            },
         };
 
-        let result = client.register_module(module).await;
+        let result = client.create_module(&module).await;
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_unregister_module() {
-        let mock_server = MockServer::start().await;
-
-        Mock::given(method("DELETE"))
-            .and(path("/modules/test"))
-            .respond_with(ResponseTemplate::new(204))
-            .mount(&mock_server)
-            .await;
-
-        let client = RegistrarClient::new(mock_server.uri());
-
-        let result = client.unregister_module("test").await;
-        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
     }
 }

@@ -44,12 +44,13 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use registrar::{
+use registrar_core::{
     Module, ModuleType, ModuleStatus,
-    LocalRegistry, RegistryError,
+    Registry, RegistryError,
 };
 use thiserror::Error;
 use tower_http::trace::TraceLayer;
+use async_trait::async_trait;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -81,8 +82,6 @@ impl IntoResponse for ApiError {
     }
 }
 
-type Result<T> = std::result::Result<T, ApiError>;
-
 // API response types
 #[derive(Debug, Serialize)]
 struct ModuleResponse {
@@ -102,85 +101,97 @@ struct CreateModuleRequest {
 // State type for sharing the registry across handlers
 #[derive(Clone)]
 struct AppState {
-    registry: Arc<LocalRegistry>,
+    registry: Arc<dyn Registry>,
 }
 
 // API handlers
-async fn list_modules(State(state): State<AppState>) -> Result<Json<Vec<ModuleResponse>>> {
+async fn list_modules(
+    State(state): State<AppState>,
+) -> std::result::Result<Json<Vec<ModuleResponse>>, ApiError> {
     let modules = state.registry.list_modules().await?;
-    let response = modules
-        .into_iter()
-        .map(|m| ModuleResponse {
-            name: m.name,
-            status: m.status,
-            module_type: m.module_type,
-        })
-        .collect();
-    Ok(Json(response))
+    Ok(Json(
+        modules
+            .into_iter()
+            .map(|m| ModuleResponse {
+                name: m.name,
+                status: m.status,
+                module_type: m.module_type,
+            })
+            .collect(),
+    ))
 }
 
 async fn get_module(
     State(state): State<AppState>,
     Path(name): Path<String>,
-) -> Result<Json<ModuleResponse>> {
+) -> std::result::Result<Json<ModuleResponse>, ApiError> {
     let module = state.registry.get_module(&name).await?;
-    Ok(Json(ModuleResponse {
-        name: module.name,
-        status: module.status,
-        module_type: module.module_type,
-    }))
+    match module {
+        Some(m) => Ok(Json(ModuleResponse {
+            name: m.name,
+            status: m.status,
+            module_type: m.module_type,
+        })),
+        None => Err(ApiError::Registry(RegistryError::ModuleNotFound(name))),
+    }
 }
 
 async fn create_module(
     State(state): State<AppState>,
     Json(request): Json<CreateModuleRequest>,
-) -> Result<StatusCode> {
+) -> std::result::Result<StatusCode, ApiError> {
     let module = Module {
-        name: request.name.clone(),
+        name: request.name,
         module_type: request.module_type,
-        status: ModuleStatus::new(),
+        status: ModuleStatus::Stopped,
     };
-    state.registry.register_module(module).await?;
+    state.registry.create_module(&module).await?;
     Ok(StatusCode::CREATED)
 }
 
 async fn delete_module(
     State(state): State<AppState>,
     Path(name): Path<String>,
-) -> Result<StatusCode> {
+) -> std::result::Result<StatusCode, ApiError> {
     state.registry.unregister_module(&name).await?;
-    Ok(StatusCode::OK)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn get_module_status(
     State(state): State<AppState>,
     Path(name): Path<String>,
-) -> Result<Json<ModuleStatus>> {
-    let status = state.registry.get_module_status(&name).await?;
-    Ok(Json(status))
+) -> std::result::Result<Json<ModuleStatus>, ApiError> {
+    let module = state.registry.get_module(&name).await?;
+    match module {
+        Some(m) => Ok(Json(m.status)),
+        None => Err(ApiError::Registry(RegistryError::ModuleNotFound(name))),
+    }
 }
 
 async fn update_module_status(
     State(state): State<AppState>,
     Path(name): Path<String>,
     Json(status): Json<ModuleStatus>,
-) -> Result<StatusCode> {
-    let mut module = state.registry.get_module(&name).await?;
-    module.status = status;
-    state.registry.register_module(module).await?;
+) -> std::result::Result<StatusCode, ApiError> {
+    state.registry.update_module_status(&name, status).await?;
     Ok(StatusCode::OK)
 }
 
 async fn start_module(
     State(state): State<AppState>,
     Path(name): Path<String>,
-) -> Result<StatusCode> {
+) -> std::result::Result<StatusCode, ApiError> {
     let module = state.registry.get_module(&name).await?;
-    state.registry.start_module(&name).await?;
-    Ok(StatusCode::OK)
+    match module {
+        Some(_) => {
+            state.registry.start_module(&name).await?;
+            Ok(StatusCode::OK)
+        }
+        None => Err(ApiError::Registry(RegistryError::ModuleNotFound(name))),
+    }
 }
 
-pub fn create_router(registry: LocalRegistry) -> Router {
+pub fn create_router(registry: impl Registry + 'static) -> Router {
     let state = AppState {
         registry: Arc::new(registry),
     };

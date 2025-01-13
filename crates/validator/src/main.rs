@@ -1,13 +1,25 @@
 use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use anyhow::Result;
-use docker_manager::{DockerManager, ContainerConfig};
+use docker_manager::DockerManager;
 use registrar_api::client::{RegistrarClient, RegistrarClientTrait, ClientError};
 use registrar::module::{Module, ModuleStatus, ModuleState};
 use validator::{ValidatorManager, api};
 use std::fs;
+use std::path::{Path, PathBuf};
+use bollard::Docker;
+use bollard::container::Config;
+use bollard::service::HostConfig;
+use bollard::models::PortBinding;
+use std::collections::HashMap;
 use serde_yaml;
-use docker_manager::ContainerManager;
+use dotenv::from_path;
+use std::process::Command;
+use reqwest;
+use base64::{Engine as _, engine::general_purpose};
+use sha2::{Sha256, Digest};
+use serde::{Deserialize, Serialize};
+use tempfile::TempDir;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -16,7 +28,7 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Commands {
     /// Register this validator with a registrar
     Register {
@@ -38,6 +50,128 @@ enum Commands {
         #[arg(long)]
         config: String,
     },
+    /// Install a module
+    Install(InstallCommand),
+}
+
+#[derive(Deserialize)]
+struct InstallationPackage {
+    package: String,  // base64 encoded
+    hash: String,
+    metadata: ModuleMetadata,
+}
+
+#[derive(Deserialize)]
+struct ModuleMetadata {
+    name: String,
+    version: String,
+    repo_url: String,
+    branch: String,
+}
+
+#[derive(Parser, Debug)]
+struct InstallCommand {
+    /// Name of the module to install
+    #[clap(long)]
+    name: String,
+
+    /// URL of the registrar to get the module from
+    #[clap(long)]
+    registrar_url: String,
+
+    /// Skip prompts and use default values
+    #[clap(long)]
+    no_prompt: bool,
+}
+
+impl InstallCommand {
+    async fn run(&self) -> Result<()> {
+        println!("Fetching installation package for module '{}'...", self.name);
+        
+        // Get installation package from registrar
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&format!("{}/api/v1/subnet-modules/{}/package", 
+                self.registrar_url, 
+                self.name
+            ))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Failed to fetch installation package: {}", 
+                response.text().await?);
+        }
+
+        let package: InstallationPackage = response.json().await?;
+        
+        // Verify package hash
+        let decoded = general_purpose::STANDARD.decode(&package.package)?;
+        let mut hasher = Sha256::new();
+        hasher.update(&decoded);
+        let hash = format!("{:x}", hasher.finalize());
+        
+        if hash != package.hash {
+            anyhow::bail!("Package hash verification failed");
+        }
+
+        // Create temporary directory for unpacking
+        let temp_dir = TempDir::new()?;
+        let package_path = temp_dir.path().join("install_package.tar.gz");
+        fs::write(&package_path, decoded)?;
+
+        // Extract package
+        let status = Command::new("tar")
+            .args(["xzf", package_path.to_str().unwrap()])
+            .current_dir(temp_dir.path())
+            .status()
+            .context("Failed to extract installation package")?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to extract installation package");
+        }
+
+        // Run installer script
+        let installer_path = temp_dir.path().join("install.sh");
+        let mut cmd = Command::new("bash");
+        cmd.arg(&installer_path)
+            .env("MODULE_NAME", &self.name)
+            .env("REGISTRAR_URL", &self.registrar_url)
+            .env("NO_PROMPT", self.no_prompt.to_string());
+
+        if self.no_prompt {
+            cmd.arg("--no-prompt");
+        }
+
+        let status = cmd.status()
+            .context("Failed to run installer script")?;
+
+        if !status.success() {
+            anyhow::bail!("Installation failed");
+        }
+
+        println!("\nModule '{}' installed successfully!", self.name);
+        println!("Metadata:");
+        println!("  Version: {}", package.metadata.version);
+        println!("  Repository: {}", package.metadata.repo_url);
+        println!("  Branch: {}", package.metadata.branch);
+        
+        Ok(())
+    }
+}
+
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
+    fs::create_dir_all(&dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -61,6 +195,12 @@ async fn main() -> Result<()> {
             }
             println!("Using config file: {}", config);
 
+            // Load .env file from the same directory as config
+            let config_dir = Path::new(&config).parent().unwrap();
+            let env_path = config_dir.join(".env");
+            println!("Loading environment from: {}", env_path.display());
+            from_path(&env_path)?;
+
             // Load config file
             let config_str = fs::read_to_string(&config)?;
             let module_config: Module = serde_yaml::from_str(&config_str)?;
@@ -77,20 +217,124 @@ async fn main() -> Result<()> {
                 Arc::new(ValidatorManager::new(docker.clone(), Box::new(NoopRegistrarClient)))
             };
 
-            // Start the Python validator container
-            if let Module { name, module_type: registrar::module::ModuleType::Docker { image, tag, port: container_port, env, volumes, health_check }, .. } = module_config {
+            // Start the Python validator container using bollard
+            if let Module { name, module_type: registrar::module::ModuleType::Docker { image, tag, port: container_port, env, volumes, health_check: _ }, .. } = module_config {
                 println!("Starting Python validator container...");
-                let container_config = ContainerConfig {
-                    name: name.clone(),
-                    image,
-                    tag,
-                    env,
-                    ports: Some([(container_port.to_string(), container_port.to_string())].iter().cloned().collect()),
-                    volumes,
-                    health_check,
+
+                // Connect to Docker daemon
+                let docker = Docker::connect_with_local_defaults()?;
+
+                // Convert environment variables with actual values
+                let env_vars: Vec<String> = if let Some(env_map) = env {
+                    env_map.into_iter()
+                        .map(|(k, v)| {
+                            let value = if v.starts_with("${") && v.ends_with("}") {
+                                // Extract env var name and get its value
+                                let env_name = &v[2..v.len()-1];
+                                std::env::var(env_name).unwrap_or_else(|_| v.clone())
+                            } else {
+                                v
+                            };
+                            format!("{}={}", k, value)
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
                 };
-                docker.create_container(container_config.clone()).await?;
-                docker.start_container(&name).await?;
+                println!("Environment variables: {:?}", env_vars);
+
+                // Convert volumes
+                let binds: Vec<String> = if let Some(vol_map) = volumes {
+                    vol_map.into_iter()
+                        .map(|(k, v)| format!("{}:{}", k, v))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                println!("Volume bindings: {:?}", binds);
+
+                // Create port bindings
+                let mut port_bindings = HashMap::new();
+                let mut exposed_ports = HashMap::new();
+                let port_key = format!("{}/tcp", container_port);
+                
+                let mut binding = Vec::new();
+                binding.push(PortBinding {
+                    host_ip: Some("0.0.0.0".to_string()),
+                    host_port: Some(container_port.to_string()),
+                });
+                port_bindings.insert(port_key.clone(), Some(binding));
+                exposed_ports.insert(port_key, HashMap::new());
+
+                // Create container
+                let config = Config {
+                    image: Some(format!("{}:{}", image, tag)),
+                    cmd: Some(vec!["python".to_string(), "-m".to_string(), "zangief.validator.validator".to_string()]),
+                    env: Some(env_vars),
+                    exposed_ports: Some(exposed_ports),
+                    host_config: Some(HostConfig {
+                        port_bindings: Some(port_bindings),
+                        binds: Some(binds),
+                        auto_remove: Some(true),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                };
+                println!("Container config: {:?}", config);
+
+                // First, try to remove any existing container with the same name
+                match docker.remove_container(&name, None).await {
+                    Ok(_) => println!("Removed existing container"),
+                    Err(e) => println!("No existing container to remove: {}", e),
+                }
+
+                // Create and start container
+                println!("Creating container with name: {}", name);
+                let container = match docker.create_container(
+                    Some(bollard::container::CreateContainerOptions {
+                        name: &name,
+                        platform: None,
+                    }), 
+                    config
+                ).await {
+                    Ok(container) => {
+                        println!("Container created successfully with ID: {}", container.id);
+                        container
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to create container: {}", e);
+                        return Err(anyhow::anyhow!("Failed to create container: {}", e));
+                    }
+                };
+
+                println!("Starting container {}", container.id);
+                match docker.start_container::<String>(&container.id, None).await {
+                    Ok(_) => println!("Container started successfully"),
+                    Err(e) => {
+                        eprintln!("Failed to start container: {}", e);
+                        return Err(anyhow::anyhow!("Failed to start container: {}", e));
+                    }
+                }
+
+                // Verify container is running
+                match docker.inspect_container(&container.id, None).await {
+                    Ok(info) => {
+                        if let Some(state) = info.state {
+                            if let Some(running) = state.running {
+                                if running {
+                                    println!("Container is running");
+                                } else {
+                                    eprintln!("Container is not running");
+                                    if let Some(error) = state.error {
+                                        eprintln!("Container error: {}", error);
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => eprintln!("Failed to inspect container: {}", e),
+                }
+
                 println!("Python validator container started");
             }
 
@@ -107,6 +351,7 @@ async fn main() -> Result<()> {
             
             Ok(())
         }
+        Commands::Install(cmd) => cmd.run().await,
     }
 }
 

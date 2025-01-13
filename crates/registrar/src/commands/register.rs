@@ -39,7 +39,7 @@ impl RegisterCommand {
             name: None,
             branch: "main".to_string(),
         };
-        let module_name = ingest_cmd.run()?;
+        let module_name = ingest_cmd.run().await?;
 
         // Create environment file
         let config_dir = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/config"));
