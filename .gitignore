@@ -15,8 +15,9 @@ config/
 *.swo
 
 # Documentation and progress files
-PROGRESS.md
 **/PROGRESS.md
+!PROGRESS.md
+!**/ARCHITECTURE.md
 
 # SQLite files
 *.sqlite
@@ -65,7 +66,6 @@ Cargo.lock
 # OS specific files
 .DS_Store
 .directory
-.Trash-*
 
 # Commune specific files
 .commune-env/
