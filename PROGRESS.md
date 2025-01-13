@@ -1,78 +1,73 @@
-# Synapsis Subnet Progress
+# Development Progress
 
-## Overall Status
-- [x] Basic project structure
-- [x] Core crate organization
-- [x] Docker integration
-- [x] Module management
-- [ ] Networking
-- [ ] Security
-- [ ] Documentation
-- [ ] Testing
-- [ ] Deployment
+## Current Status (2025-01-13)
 
-## Component Status
+### Registrar Service
+- [x] Basic service structure
+- [x] SQLite database integration
+- [x] Module registration API
+- [x] Docker runtime integration
+- [x] Basic module verification
+- [ ] Advanced security checks
+- [ ] Module versioning
+- [ ] Dependency management
 
-### Registrar
-- [x] Basic registry functionality
-- [x] Module management
-- [x] Docker integration
-- [x] HTTP API
-- [ ] Advanced validation
-- [ ] Persistence
-
-### Validator
-- [x] Basic validator manager
-- [x] Docker container management
-- [x] Module registration
-- [x] Subnet verification
-- [x] Registrar API integration
-- [x] Test infrastructure
-- [ ] Error handling
-- [ ] Monitoring
+### Validator Service
+- [x] Basic service structure
+- [x] Request validation
+- [ ] Load balancing
+- [ ] Result verification
 - [ ] Performance optimization
+- [ ] Fault tolerance
 
-### Docker Manager
-- [x] Container lifecycle management
-- [x] Basic error handling
-- [ ] Advanced networking
-- [ ] Resource management
+### Infrastructure
+- [x] Docker integration
+- [x] Database migrations
+- [x] Basic CI/CD
 - [ ] Monitoring
+- [ ] Logging infrastructure
+- [ ] Metrics collection
 
-## Recent Updates (2025-01-09)
-- Added registrar API client for validator-registrar communication
-- Implemented proper module cleanup in validator
-- Added test mocks for validator testing
-- Fixed module registration and startup issues
-- Improved test coverage across components
+## Recent Updates
 
-## Next Steps
-1. Implement comprehensive error handling
-2. Add metrics and monitoring
-3. Improve test coverage
-4. Add documentation
-5. Optimize performance
-6. Implement security features
+### 2025-01-13
+- Improved registrar database handling
+- Added proper SQLite connection options
+- Implemented better type safety
+- Added comprehensive documentation
+- Created component architecture docs
+
+### 2025-01-12
+- Added SQLite database support
+- Created initial database schema
+- Set up migrations system
+- Added basic module registration
+
+## Upcoming Work
+
+### Short Term (Next 2 Weeks)
+1. Complete module verification system
+2. Implement advanced security checks
+3. Add module versioning support
+4. Improve error handling
+
+### Medium Term (1-2 Months)
+1. Implement dependency management
+2. Add module update mechanism
+3. Improve module isolation
+4. Add monitoring and metrics
+
+### Long Term (3+ Months)
+1. GUI interface
+2. Advanced load balancing
+3. Automated testing infrastructure
+4. Performance optimization
 
 ## Known Issues
-- Need to improve error handling for API communication
-- Test coverage could be improved
-- Documentation needs updating
-- Need to add proper logging throughout
+1. Module verification needs improvement
+2. Error handling could be more robust
+3. Missing proper logging infrastructure
+4. Need better test coverage
 
-## Dependencies
-### Core
-- tokio: Async runtime
-- serde: Serialization
-- thiserror: Error handling
-
-### API
-- axum: HTTP server
-- reqwest: HTTP client
-
-### Testing
-- wiremock: HTTP mocking
-- tokio-test: Async testing
-
-### Docker
-- bollard: Docker API
+## Contributing
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on contributing to the project.
