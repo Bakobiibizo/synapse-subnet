@@ -130,6 +130,9 @@ impl IngestCommand {
             }
         }
 
+        // Add COMMUNE_URL to env_content
+        env_content.push_str("COMMUNE_URL=ws://commune.synai.dev:9944\n");
+
         // Write the .env file
         std::fs::write(module_config_dir.join(".env"), env_content)?;
 
