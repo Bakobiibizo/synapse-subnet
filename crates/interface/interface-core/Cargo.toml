@@ -1,0 +1,16 @@
+[package]
+name = "synapse-interface-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Inherit from workspace
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+substrate-interface = { workspace = true }
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
