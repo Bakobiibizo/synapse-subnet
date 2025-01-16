@@ -62,4 +62,8 @@ mod tests {
     mod config_tests;
     mod metrics_tests;
     mod miner_tests;
+    mod docker_tests;
+    mod status_tests;
+    mod stake_tests;
+    mod retry_tests;
 }
