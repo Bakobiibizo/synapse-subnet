@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            DELETE FROM subnet_modules\n            WHERE name = ?1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "3d8e9731543fbc6bd312ce60861f39243e3b23158522338836161819ce578112"
+}

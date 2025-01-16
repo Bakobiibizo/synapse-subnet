@@ -1,0 +1,68 @@
+<!-- Module registration form -->
+<form class="module-form p-4 space-y-4"
+      hx-post="{{ action }}"
+      hx-target="#main-content">
+    
+    <!-- Error messages -->
+    {% if !errors.is_empty() %}
+    <div class="errors bg-red-50 border-red-200 text-red-700 p-4 rounded-lg">
+        {% for error in errors %}
+        <p>{{ error }}</p>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Module name -->
+    <div class="form-group">
+        <label for="name" class="block text-sm font-medium text-gray-700">
+            Module Name
+        </label>
+        <input type="text"
+               id="name"
+               name="name"
+               value="{{ module.name|default("") }}"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+               required>
+    </div>
+
+    <!-- Version -->
+    <div class="form-group">
+        <label for="version" class="block text-sm font-medium text-gray-700">
+            Version
+        </label>
+        <input type="text"
+               id="version"
+               name="version"
+               value="{{ module.version|default("") }}"
+               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+               required>
+    </div>
+
+    <!-- Environment variables -->
+    <div class="form-group">
+        <label class="block text-sm font-medium text-gray-700">
+            Environment Variables
+        </label>
+        <div class="env-vars mt-2 space-y-2"
+             hx-target="closest div"
+             hx-swap="outerHTML">
+            <!-- Dynamic env var fields will be added here -->
+            <button type="button"
+                    class="btn btn-sm btn-secondary"
+                    hx-get="/components/registrar/env-var-field"
+                    hx-target="closest .env-vars"
+                    hx-swap="beforeend">
+                Add Variable
+            </button>
+        </div>
+    </div>
+
+    <!-- Submit button -->
+    <div class="flex justify-end">
+        <button type="submit" 
+                class="btn btn-primary"
+                hx-disable>
+            Register Module
+        </button>
+    </div>
+</form>

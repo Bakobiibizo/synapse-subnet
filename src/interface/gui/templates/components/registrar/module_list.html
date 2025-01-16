@@ -1,0 +1,63 @@
+<!-- Module list component -->
+<div class="module-list" 
+     hx-get="/api/registrar/modules" 
+     hx-trigger="every 30s">
+    
+    <!-- Filter -->
+    <div class="filter-bar">
+        <input type="text" 
+               name="filter" 
+               placeholder="Filter modules..."
+               hx-get="/components/registrar/module-list"
+               hx-trigger="keyup changed delay:500ms"
+               hx-target="closest .module-list"
+               value="{{ filter|default("") }}">
+    </div>
+
+    <!-- Module grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for module in modules %}
+        <div class="module-card p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow">
+            <div class="flex justify-between items-start">
+                <h3 class="text-lg font-semibold">{{ module.name }}</h3>
+                <span class="text-sm text-gray-500">v{{ module.version }}</span>
+            </div>
+            
+            <div class="mt-2">
+                <!-- Status indicator -->
+                <div class="status-badge"
+                     hx-get="/components/registrar/module-status/{{ module.name }}"
+                     hx-trigger="every 10s">
+                    <!-- Status will be loaded here -->
+                </div>
+                
+                <!-- Actions -->
+                <div class="mt-4 flex space-x-2">
+                    <button class="btn btn-sm btn-primary"
+                            hx-post="/api/registrar/modules/{{ module.name }}/start"
+                            hx-confirm="Start module {{ module.name }}?">
+                        Start
+                    </button>
+                    <button class="btn btn-sm btn-danger"
+                            hx-delete="/api/registrar/modules/{{ module.name }}"
+                            hx-confirm="Delete module {{ module.name }}?">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Empty state -->
+    {% if modules.is_empty() %}
+    <div class="text-center py-8 text-gray-500">
+        <p>No modules found</p>
+        <button class="btn btn-primary mt-4"
+                hx-get="/components/registrar/module-form"
+                hx-target="#main-content">
+            Register New Module
+        </button>
+    </div>
+    {% endif %}
+</div>

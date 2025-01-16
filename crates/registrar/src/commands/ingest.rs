@@ -3,7 +3,10 @@ use anyhow::Result;
 use clap::Parser;
 use registrar_core::{ModuleType, ModuleStatus};
 use time::OffsetDateTime;
-use crate::registry::Registry;
+use std::io::Write;
+use crate::Registry;
+use tokio::process::Command;
+use sqlx;
 
 const CONFIG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config");
 const MODULES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/subnet-modules");
@@ -31,13 +34,22 @@ impl IngestCommand {
         // Create temporary directory for cloning
         let temp_dir = tempfile::tempdir()?;
         
-        // Clone the repository
+        // Clone the repository using git command
         println!("Cloning repository {}...", self.repo);
-        let repo = git2::Repository::clone(&self.repo, temp_dir.path())?;
-        
-        // Checkout specified branch
-        let obj = repo.revparse_single(&format!("origin/{}", self.branch))?;
-        repo.checkout_tree(&obj, None)?;
+        let status = Command::new("git")
+            .args([
+                "clone",
+                "--depth", "1",
+                "--branch", &self.branch,
+                &self.repo,
+                temp_dir.path().to_str().unwrap()
+            ])
+            .status()
+            .await?;
+            
+        if !status.success() {
+            anyhow::bail!("Failed to clone repository");
+        }
         
         // Get module name from repo URL or custom name
         let name = self.name.clone().unwrap_or_else(|| {
@@ -49,39 +61,84 @@ impl IngestCommand {
                 .to_string()
         });
 
-        // Validate module structure
-        let temp_path = temp_dir.path();
-        if !temp_path.join("Dockerfile").exists() {
-            anyhow::bail!("Module must contain a Dockerfile");
+        // Clean up existing module if it exists
+        let db_url = format!("sqlite:{}/data/registrar.db", env!("CARGO_MANIFEST_DIR"));
+        let registry = Registry::new(&db_url, PathBuf::from(CONFIG_DIR).join(&name)).await?;
+        
+        // Delete from database if exists
+        sqlx::query!(
+            r#"
+            DELETE FROM subnet_modules
+            WHERE name = ?1
+            "#,
+            name
+        )
+        .execute(&registry.db().clone())
+        .await?;
+        
+        // Remove module directory
+        let module_dir = PathBuf::from(CONFIG_DIR).join(&name);
+        if module_dir.exists() {
+            std::fs::remove_dir_all(&module_dir)?;
         }
 
         // Create module config directory
         let module_config_dir = PathBuf::from(CONFIG_DIR).join(&name);
         std::fs::create_dir_all(&module_config_dir)?;
 
-        // Create module directory in subnet-modules
-        let module_dir = PathBuf::from(CONFIG_DIR).join(&name);
-        if module_dir.exists() {
-            std::fs::remove_dir_all(&module_dir)?;
-        }
-        
         // Copy directory contents
-        copy_dir_all(temp_dir.path(), &module_dir)?;
+        copy_dir_all(temp_dir.path(), &module_config_dir)?;
 
-        // Create or copy .env.example
+        // Read .env.example and prompt for values
+        let temp_path = temp_dir.path();
         let env_example = if temp_path.join(".env.example").exists() {
             std::fs::read_to_string(temp_path.join(".env.example"))?
         } else {
             create_default_env_template(&name)
         };
-        std::fs::write(module_config_dir.join(".env.example"), env_example)?;
+
+        // Parse .env.example and prompt for values
+        let mut env_content = String::new();
+        
+        // Always add GITHUB_REPOSITORY first
+        env_content.push_str("GITHUB_REPOSITORY=hydra-dynamix/zangief\n");
+        
+        // Process each line from .env.example
+        for line in env_example.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            
+            // Skip if it's GITHUB_REPOSITORY since we already added it
+            if line.contains("GITHUB_REPOSITORY") {
+                continue;
+            }
+
+            if let Some((key, default_value)) = line.split_once('=') {
+                let key = key.trim();
+                let default_value = default_value.trim();
+
+                print!("{} [default: {}]: ", key, default_value);
+                std::io::stdout().flush()?;
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                let value = input.trim();
+
+                let final_value = if value.is_empty() { default_value } else { value };
+                env_content.push_str(&format!("{}={}\n", key, final_value));
+            }
+        }
+
+        // Add COMMUNE_URL to env_content
+        env_content.push_str("COMMUNE_URL=ws://commune.synai.dev:9944\n");
+
+        // Write the .env file
+        std::fs::write(module_config_dir.join(".env"), env_content)?;
 
         // Create config.yaml
         let config = create_config_yaml(&name)?;
         std::fs::write(module_config_dir.join("config.yaml"), config)?;
-
-        let db_url = format!("sqlite:{}/data/registrar.db", env!("CARGO_MANIFEST_DIR"));
-        let registry = Registry::new(&db_url, &module_dir).await?;
 
         let registry_module = crate::registry::RegistryModule {
             id: 0,
@@ -103,9 +160,21 @@ impl IngestCommand {
 
         println!("\nModule '{}' ingested successfully!", name);
         println!("Configuration files created in: {}", module_config_dir.display());
-        println!("\nTo install this module on a validator, run:");
-        println!("cargo run -p validator -- install --name {} --registrar-url http://localhost:8080", name);
         
+        // Launch with docker-compose
+        println!("\nStarting module with docker-compose...");
+        let docker_compose_path = format!("{}/{}/docker-compose.yml", CONFIG_DIR, name);
+        let status = Command::new("docker")
+            .args(["compose", "-f", &docker_compose_path, "up", "-d"])
+            .status()
+            .await?;
+
+        if status.success() {
+            println!("Module started successfully!");
+        } else {
+            println!("Warning: Failed to start module container");
+        }
+
         Ok(name)
     }
 }

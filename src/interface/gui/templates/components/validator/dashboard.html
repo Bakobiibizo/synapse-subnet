@@ -1,0 +1,77 @@
+<!-- Validator dashboard -->
+<div class="validator-dashboard p-4 space-y-6"
+     hx-get="/api/validator/status"
+     hx-trigger="every 5s">
+    
+    <!-- Status overview -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Status card -->
+        <div class="stat-card p-4 rounded-lg border {% if status.is_active %}bg-green-50 border-green-200{% else %}bg-red-50 border-red-200{% endif %}">
+            <h3 class="text-lg font-semibold">Status</h3>
+            <div class="mt-2">
+                <p class="text-2xl font-bold">
+                    {% if status.is_active %}Active{% else %}Inactive{% endif %}
+                </p>
+                <p class="text-sm text-gray-500">
+                    Uptime: {{ status.uptime|format_duration }}
+                </p>
+            </div>
+        </div>
+
+        <!-- Performance metrics -->
+        <div class="stat-card p-4 rounded-lg border bg-blue-50 border-blue-200">
+            <h3 class="text-lg font-semibold">Performance</h3>
+            <div class="mt-2">
+                <p class="text-2xl font-bold">{{ metrics.success_rate * 100 }}%</p>
+                <p class="text-sm text-gray-500">
+                    {{ metrics.total_validations }} validations
+                </p>
+            </div>
+        </div>
+
+        <!-- Response time -->
+        <div class="stat-card p-4 rounded-lg border bg-purple-50 border-purple-200">
+            <h3 class="text-lg font-semibold">Response Time</h3>
+            <div class="mt-2">
+                <p class="text-2xl font-bold">{{ metrics.average_response_time }}ms</p>
+                <p class="text-sm text-gray-500">Average</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active modules -->
+    <div class="active-modules">
+        <h3 class="text-lg font-semibold mb-4">Active Modules</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for module in active_modules %}
+            <div class="module-card p-4 border rounded-lg"
+                 hx-get="/components/validator/module-status/{{ module }}"
+                 hx-trigger="every 10s">
+                <h4 class="font-medium">{{ module }}</h4>
+                <!-- Module status will be loaded here -->
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions flex space-x-4">
+        <button class="btn btn-primary"
+                hx-get="/components/validator/config-form"
+                hx-target="#main-content">
+            Configure
+        </button>
+        {% if status.is_active %}
+        <button class="btn btn-danger"
+                hx-post="/api/validator/stop"
+                hx-confirm="Stop all validation?">
+            Stop All
+        </button>
+        {% else %}
+        <button class="btn btn-success"
+                hx-post="/api/validator/start">
+            Start
+        </button>
+        {% endif %}
+    </div>
+</div>
