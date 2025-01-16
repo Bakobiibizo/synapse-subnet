@@ -39,10 +39,19 @@
 //! - MetricsInterface: For performance monitoring
 //! - StorageInterface: For state persistence
 
+pub mod config;
+pub mod metrics;
+pub mod miner;
+
+pub use config::{MinerConfig, ResourceLimits, PriorityLevel, ConfigError};
+pub use metrics::{MinerMetrics, MetricsError};
+pub use miner::{Miner, MinerInterface, MinerState, MinerError};
+
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+    use super::*;
+    
+    mod config_tests;
+    mod metrics_tests;
+    mod miner_tests;
 }

@@ -16,7 +16,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono"] }
-bollard = "0.14"
+bollard = "0.15"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -30,4 +30,5 @@ members = [
     "crates/docker-manager",
     "crates/chain-api",
     "crates/validator",
+    "crates/miner",
 ]

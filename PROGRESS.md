@@ -1,6 +1,6 @@
 # Development Progress
 
-## Current Status (2025-01-13)
+## Current Status (2025-01-16)
 
 ### Registrar Service
 - [x] Basic service structure
@@ -20,6 +20,17 @@
 - [ ] Performance optimization
 - [ ] Fault tolerance
 
+### Miner Service
+- [x] Basic service structure
+- [x] Configuration management
+- [x] Metrics tracking
+- [x] State management
+- [ ] Docker integration
+- [ ] Mining logic implementation
+- [ ] WebSocket status updates
+- [ ] Stake management
+- [ ] Priority-based retry mechanism
+
 ### Infrastructure
 - [x] Docker integration
 - [x] Database migrations
@@ -29,6 +40,14 @@
 - [ ] Metrics collection
 
 ## Recent Updates
+
+### 2025-01-16
+- Added core miner component implementation
+  - Configuration management with resource limits
+  - Metrics tracking for mining operations
+  - State management and lifecycle controls
+  - Comprehensive test coverage
+- Added miner crate to workspace
 
 ### 2025-01-13
 - Improved registrar database handling
