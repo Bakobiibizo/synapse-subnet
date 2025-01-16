@@ -42,10 +42,18 @@
 pub mod config;
 pub mod metrics;
 pub mod miner;
+pub mod docker;
+pub mod status;
+pub mod stake;
+pub mod retry;
 
 pub use config::{MinerConfig, ResourceLimits, PriorityLevel, ConfigError};
 pub use metrics::{MinerMetrics, MetricsError};
 pub use miner::{Miner, MinerInterface, MinerState, MinerError};
+pub use docker::{DockerManager, DockerManagerImpl, ContainerConfig, ContainerStats, DockerError};
+pub use status::{StatusManager, StatusManagerImpl, StatusUpdate, HealthStatus, StatusError};
+pub use stake::{StakeManager, StakeManagerImpl, StakeInfo, StakeTransaction, StakeError};
+pub use retry::{RetryManager, RetryableOperation, RetryConfig, RetryError};
 
 #[cfg(test)]
 mod tests {

@@ -41,6 +41,15 @@
 
 ## Recent Updates
 
+### 2025-01-16 (Update 2)
+- Scaffolded remaining miner components:
+  - Docker integration with container management
+  - WebSocket status updates with health monitoring
+  - Stake management with transaction handling
+  - Priority-based retry mechanism with exponential backoff
+- All components have defined interfaces and error types
+- Ready for implementation phase
+
 ### 2025-01-16
 - Added core miner component implementation
   - Configuration management with resource limits
