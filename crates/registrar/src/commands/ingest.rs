@@ -3,6 +3,7 @@ use anyhow::Result;
 use clap::Parser;
 use registrar_core::{ModuleType, ModuleStatus};
 use time::OffsetDateTime;
+use crate::registry::Registry;
 
 const CONFIG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config");
 const MODULES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/subnet-modules");

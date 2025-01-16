@@ -50,7 +50,7 @@ use registrar_core::{
 };
 use thiserror::Error;
 use tower_http::trace::TraceLayer;
-use async_trait::async_trait;
+
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -84,7 +84,7 @@ impl IntoResponse for ApiError {
 
 // API response types
 #[derive(Debug, Serialize)]
-struct ModuleResponse {
+pub struct ModuleResponse {
     name: String,
     status: ModuleStatus,
     #[serde(rename = "type")]
@@ -92,7 +92,7 @@ struct ModuleResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct CreateModuleRequest {
+pub struct CreateModuleRequest {
     name: String,
     #[serde(rename = "type")]
     module_type: ModuleType,
@@ -100,7 +100,7 @@ struct CreateModuleRequest {
 
 // State type for sharing the registry across handlers
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     registry: Arc<dyn Registry>,
 }
 
@@ -212,7 +212,10 @@ pub fn create_router(registry: impl Registry + 'static) -> Router {
 }
 
 pub mod client;
-pub use client::{RegistrarClient, ClientError};
+pub mod traits;
+
+pub use client::{RegistrarClient, ClientError, ModuleState};
+pub use traits::RegistrarClientTrait;
 
 #[cfg(test)]
 mod tests {

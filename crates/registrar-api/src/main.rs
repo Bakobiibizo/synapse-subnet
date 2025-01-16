@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use registrar::LocalRegistry;
+use std::os::unix::fs::PermissionsExt;
 
 #[tokio::main]
 async fn main() {

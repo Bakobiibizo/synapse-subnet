@@ -1,25 +1,30 @@
-use std::sync::Arc;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use anyhow::Result;
 use docker_manager::DockerManager;
-use registrar_api::client::{RegistrarClient, RegistrarClientTrait, ClientError};
-use registrar::module::{Module, ModuleStatus, ModuleState};
-use validator::{ValidatorManager, api};
+use registrar::module::Module;
+use registrar_api::{
+    RegistrarClient, ClientError, RegistrarClientTrait,
+    client::{ModuleStatus, ModuleState},
+};
+use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::process::Command;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tokio;
+use validator::{ValidatorManager, api};
+use base64::{Engine as _, engine::general_purpose};
 use bollard::Docker;
 use bollard::container::Config;
-use bollard::service::HostConfig;
 use bollard::models::PortBinding;
-use std::collections::HashMap;
-use serde_yaml;
+use bollard::service::HostConfig;
 use dotenv::from_path;
-use std::process::Command;
 use reqwest;
-use base64::{Engine as _, engine::general_purpose};
-use sha2::{Sha256, Digest};
 use serde::{Deserialize, Serialize};
-use tempfile::TempDir;
+use serde_yaml;
+use sha2::{Sha256, Digest};
+use axum;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -174,6 +179,46 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
+async fn install_module(repo_url: &str) -> Result<()> {
+    // Create temporary directory for module installation
+    let temp_dir = TempDir::new()?;
+    let package_path = temp_dir.path().join("module.tar.gz");
+
+    // Download module package
+    let response = reqwest::get(repo_url).await?;
+    let content = response.bytes().await?;
+    fs::write(&package_path, content)?;
+
+    // Extract package
+    let status = Command::new("tar")
+        .args(["xzf", package_path.to_str().unwrap()])
+        .current_dir(temp_dir.path())
+        .status()
+        .context("Failed to extract installation package")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to extract module package");
+    }
+
+    // Find and run install script
+    let install_script = temp_dir.path().join("install.sh");
+    if install_script.exists() {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(install_script.to_str().unwrap())
+            .current_dir(temp_dir.path());
+
+        let status = cmd.status()
+            .context("Failed to run installer script")?;
+
+        if !status.success() {
+            anyhow::bail!("Module installation failed");
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -183,7 +228,7 @@ async fn main() -> Result<()> {
             println!("Registering with registrar at {}", registrar_url);
             
             // Create registrar client and register
-            let _registrar = RegistrarClient::new(registrar_url);
+            let registrar = RegistrarClient::new(&registrar_url).expect("Failed to create registrar client");
             // TODO: Implement proper registration
             println!("Successfully registered with registrar");
             Ok(())
@@ -208,13 +253,15 @@ async fn main() -> Result<()> {
             // Create Docker manager
             let docker = Arc::new(DockerManager::new().await?);
 
-            // Create validator manager
-            let validator = if let Some(url) = registrar_url {
-                let registrar = Box::new(RegistrarClient::new(url));
-                Arc::new(ValidatorManager::new(docker.clone(), registrar))
+            // Initialize registrar client if URL is provided
+            let validator = if let Some(registrar_url) = registrar_url {
+                // Create registrar client
+                let registrar = RegistrarClient::new(&registrar_url).expect("Failed to create registrar client");
+                Arc::new(ValidatorManager::new(docker.clone(), Arc::new(registrar)))
             } else {
                 // Create validator without registrar connection
-                Arc::new(ValidatorManager::new(docker.clone(), Box::new(NoopRegistrarClient)))
+                let registrar = Arc::new(NoopRegistrarClient::new("noop".to_string()));
+                Arc::new(ValidatorManager::new(docker.clone(), registrar))
             };
 
             // Start the Python validator container using bollard
@@ -356,11 +403,39 @@ async fn main() -> Result<()> {
 }
 
 #[derive(Clone)]
-struct NoopRegistrarClient;
+struct NoopRegistrarClient {
+    base_url: String,
+}
+
+impl NoopRegistrarClient {
+    fn new(base_url: String) -> Self {
+        Self { base_url }
+    }
+}
 
 #[async_trait::async_trait]
 impl RegistrarClientTrait for NoopRegistrarClient {
-    async fn register_module(&self, _module: Module) -> Result<(), ClientError> {
+    async fn list_modules(&self) -> Result<Vec<registrar_api::client::Module>, ClientError> {
+        Ok(vec![])
+    }
+
+    async fn get_module(&self, _name: &str) -> Result<registrar_api::client::Module, ClientError> {
+        Err(ClientError::ModuleNotFound("noop".to_string()))
+    }
+
+    async fn create_module(&self, _module: &registrar_api::client::Module) -> Result<i64, ClientError> {
+        Ok(1)
+    }
+
+    async fn get_module_status(&self, _name: &str) -> Result<ModuleStatus, ClientError> {
+        Ok(ModuleStatus {
+            state: ModuleState::Created,
+            health: None,
+            error: None,
+        })
+    }
+
+    async fn update_module_status(&self, _name: &str, _status: &ModuleStatus) -> Result<(), ClientError> {
         Ok(())
     }
 
@@ -368,31 +443,15 @@ impl RegistrarClientTrait for NoopRegistrarClient {
         Ok(())
     }
 
-    async fn unregister_module(&self, _name: &str) -> Result<(), ClientError> {
+    async fn register_module(&self, _module: &registrar_api::client::Module) -> Result<(), ClientError> {
         Ok(())
     }
 
-    async fn get_module_status(&self, _name: &str) -> Result<ModuleStatus, ClientError> {
-        Ok(ModuleStatus {
-            state: ModuleState::Stopped,
-            error: None,
-            container_status: None,
-        })
-    }
-
-    async fn update_module_status(&self, _name: &str, _status: ModuleStatus) -> Result<(), ClientError> {
+    async fn unregister_module(&self, _name: &str) -> Result<(), ClientError> {
         Ok(())
     }
 
     async fn register_miner(&self, _uid: &str, _key: &str, _name: &str) -> Result<(), ClientError> {
         Ok(())
-    }
-
-    async fn list_modules(&self) -> Result<Vec<Module>, ClientError> {
-        Ok(vec![])
-    }
-
-    fn clone_box(&self) -> Box<dyn RegistrarClientTrait> {
-        Box::new(self.clone())
     }
 }

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
-use registrar_core::{ModuleType, ModuleStatus};
-use time::OffsetDateTime;
+use std::net::SocketAddr;
+use std::os::unix::fs::PermissionsExt;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, util::SubscriberInitExt};
 
@@ -94,7 +94,7 @@ async fn serve(cmd: ServeCommand) -> Result<()> {
 
     // Build application
     let app = axum::Router::new()
-        .nest("/api", modules::router(registry))
+        .nest("/api", crate::api::modules::router(registry))
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     info!("Starting server on {}", addr);

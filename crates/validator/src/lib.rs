@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use docker_manager::{ContainerManager, DockerError};
 use registrar::module::Module;
-use registrar_api::client::{RegistrarClientTrait, ClientError as RegistrarError};
+use registrar_api::traits::RegistrarClientTrait;
+use registrar_api::client::{ClientError as RegistrarError, Module as ApiModule};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -230,21 +231,17 @@ impl SubnetInjector {
 
 /// Manages the validator's modules and subnet configurations
 pub struct ValidatorManager {
-    #[allow(dead_code)]
     docker: Arc<dyn ContainerManager>,
-    registrar: Box<dyn RegistrarClientTrait>,
+    registrar: Arc<dyn RegistrarClientTrait>,
     subnet_modules: RwLock<HashMap<String, Module>>,
-    #[allow(dead_code)]
     module_configs: RwLock<HashMap<String, ModuleConfig>>,
     response_logger: Arc<DefaultResponseLogger>,
-    #[allow(dead_code)]
     response_tracker: Arc<ResponseTracker>,
-    #[allow(dead_code)]
     subnet_injector: SubnetInjector,
 }
 
 impl ValidatorManager {
-    pub fn new(docker: Arc<dyn ContainerManager>, registrar: Box<dyn RegistrarClientTrait>) -> Self {
+    pub fn new(docker: Arc<dyn ContainerManager>, registrar: Arc<dyn RegistrarClientTrait>) -> Self {
         let response_logger = Arc::new(DefaultResponseLogger::new());
         let subnet_injector = SubnetInjector::new(response_logger.clone());
         let response_tracker = Arc::new(ResponseTracker::new());
@@ -267,18 +264,27 @@ impl ValidatorManager {
         Ok(())
     }
 
-    pub async fn register_module(&self, module: Module) -> Result<(), ValidatorError> {
+    pub async fn register_module(&self, module: &registrar::module::Module) -> Result<(), ValidatorError> {
+        // Convert registrar::Module to registrar_api::Module
+        let api_module = ApiModule {
+            id: 0, // This will be assigned by the server
+            name: module.name.clone(),
+            version: "1.0.0".to_string(), // Default version
+            status: registrar_api::client::ModuleStatus {
+                state: registrar_api::client::ModuleState::Created,
+                health: None,
+                error: None,
+            },
+        };
+
         // Register with registrar first
-        self.registrar.register_module(module.clone()).await?;
+        self.registrar.register_module(&api_module).await?;
 
         // Store module
         let mut modules = self.subnet_modules.write().await;
-        let module = modules
+        modules
             .entry(module.name.clone())
-            .or_insert(module);
-
-        // Initialize module
-        self.start_module(&module.name).await?;
+            .or_insert_with(|| module.clone());
 
         Ok(())
     }
@@ -368,22 +374,22 @@ mod tests {
     #[async_trait]
     impl RegistrarClientTrait for MockRegistrarClient {
         async fn list_modules(&self) -> Result<Vec<Module>, RegistrarError> {
-            let module = Module {
-                name: "miner1".to_string(),
-                module_type: registrar::module::ModuleType::Docker {
-                    image: "test".to_string(),
-                    tag: "latest".to_string(),
-                    port: 8080,
-                    env: None,
-                    volumes: None,
-                    health_check: None,
-                },
-                status: ModuleStatus::new(),
-            };
-            Ok(vec![module])
+            Ok(vec![])
         }
 
-        async fn register_module(&self, _module: Module) -> Result<(), RegistrarError> {
+        async fn get_module(&self, _name: &str) -> Result<Module, RegistrarError> {
+            unimplemented!()
+        }
+
+        async fn create_module(&self, _module: &Module) -> Result<i64, RegistrarError> {
+            Ok(1)
+        }
+
+        async fn get_module_status(&self, _name: &str) -> Result<ModuleStatus, RegistrarError> {
+            unimplemented!()
+        }
+
+        async fn update_module_status(&self, _name: &str, _status: &ModuleStatus) -> Result<(), RegistrarError> {
             Ok(())
         }
 
@@ -391,24 +397,16 @@ mod tests {
             Ok(())
         }
 
-        async fn unregister_module(&self, _name: &str) -> Result<(), RegistrarError> {
+        async fn register_module(&self, _module: &ApiModule) -> Result<(), RegistrarError> {
             Ok(())
         }
 
-        async fn get_module_status(&self, _name: &str) -> Result<ModuleStatus, RegistrarError> {
-            Ok(ModuleStatus::new())
-        }
-
-        async fn update_module_status(&self, _name: &str, _status: ModuleStatus) -> Result<(), RegistrarError> {
+        async fn unregister_module(&self, _name: &str) -> Result<(), RegistrarError> {
             Ok(())
         }
 
         async fn register_miner(&self, _uid: &str, _key: &str, _name: &str) -> Result<(), RegistrarError> {
             Ok(())
-        }
-
-        fn clone_box(&self) -> Box<dyn RegistrarClientTrait> {
-            Box::new(Self::new(self.base_url.clone()))
         }
     }
 
@@ -472,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn test_response_logging() {
         let docker = Arc::new(MockDockerManager::new());
-        let registrar = Box::new(MockRegistrarClient::new("http://localhost:8080".to_string()));
+        let registrar = Arc::new(MockRegistrarClient::new("http://localhost:8080".to_string()));
         let validator = ValidatorManager::new(docker, registrar);
 
         validator.log_miner_response("miner1", true).await.unwrap();
@@ -487,7 +485,7 @@ mod tests {
     #[tokio::test]
     async fn test_monitoring_endpoint() {
         let docker = Arc::new(MockDockerManager::new());
-        let registrar = Box::new(MockRegistrarClient::new("http://localhost:8080".to_string()));
+        let registrar = Arc::new(MockRegistrarClient::new("http://localhost:8080".to_string()));
         let validator = ValidatorManager::new(docker, registrar);
         let chain_api = Arc::new(MockChainApi::new());
 
