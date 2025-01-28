@@ -121,13 +121,14 @@ impl Registry {
     /// # Returns
     /// The ID of the newly created module
     pub async fn create_module(&self, module: &RegistryModule) -> Result<i64> {
-        let result = sqlx::query(
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        
+        let id = sqlx::query(
             r#"
             INSERT INTO subnet_modules (
-                name, version, repo_url, branch, description, author, license,
-                created_at, updated_at, downloads, module_type, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            RETURNING id
+                name, version, repo_url, branch, description, author,
+                license, created_at, updated_at, module_type, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&module.name)
@@ -137,16 +138,14 @@ impl Registry {
         .bind(&module.description)
         .bind(&module.author)
         .bind(&module.license)
-        .bind(module.created_at)
-        .bind(module.updated_at)
-        .bind(module.downloads)
+        .bind(now)
+        .bind(now)
         .bind(&module.module_type)
         .bind(&module.status)
-        .fetch_one(&self.db)
-        .await
-        .context("Failed to insert module")?;
+        .execute(&self.db)
+        .await?
+        .last_insert_rowid();
 
-        let id: i64 = result.get(0);
         Ok(id)
     }
 
@@ -160,28 +159,14 @@ impl Registry {
     pub async fn get_module(&self, name: &str) -> Result<Option<RegistryModule>> {
         let module = sqlx::query_as::<_, RegistryModule>(
             r#"
-            SELECT 
-                id, 
-                name, 
-                version, 
-                repo_url, 
-                branch, 
-                description,
-                author,
-                license,
-                created_at,
-                updated_at,
-                downloads,
-                module_type,
-                status
+            SELECT *
             FROM subnet_modules
             WHERE name = ?
             "#,
         )
         .bind(name)
         .fetch_optional(&self.db)
-        .await
-        .context("Failed to get module")?;
+        .await?;
 
         Ok(module)
     }
@@ -193,26 +178,13 @@ impl Registry {
     pub async fn list_modules(&self) -> Result<Vec<RegistryModule>> {
         let modules = sqlx::query_as::<_, RegistryModule>(
             r#"
-            SELECT 
-                id, 
-                name, 
-                version, 
-                repo_url, 
-                branch, 
-                description,
-                author,
-                license,
-                created_at,
-                updated_at,
-                downloads,
-                module_type,
-                status
+            SELECT *
             FROM subnet_modules
+            ORDER BY name ASC
             "#,
         )
         .fetch_all(&self.db)
-        .await
-        .context("Failed to list modules")?;
+        .await?;
 
         Ok(modules)
     }
@@ -224,13 +196,14 @@ impl Registry {
     pub async fn increment_downloads(&self, name: &str) -> Result<()> {
         sqlx::query(
             r#"
-            UPDATE subnet_modules SET downloads = downloads + 1 WHERE name = ?
+            UPDATE subnet_modules
+            SET downloads = downloads + 1
+            WHERE name = ?
             "#,
         )
         .bind(name)
         .execute(&self.db)
-        .await
-        .context("Failed to increment downloads")?;
+        .await?;
 
         Ok(())
     }

@@ -1,0 +1,19 @@
+# zangief Configuration
+
+# Network settings
+network:
+  port: 8000
+  host: "0.0.0.0"
+
+# Module settings
+module:
+  name: "zangief"
+  version: "0.1.0"
+  log_level: "info"
+  batch_size: 32
+
+# Resource limits
+resources:
+  cpu: 1.0
+  memory: "1Gi"
+  gpu: 0
