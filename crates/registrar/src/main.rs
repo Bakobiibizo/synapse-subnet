@@ -84,18 +84,13 @@ async fn serve(cmd: ServeCommand) -> Result<()> {
         )?;
     }
     
-    // Remove existing database to start fresh
-    if db_path.exists() {
-        std::fs::remove_file(&db_path)?;
-    }
-    
     let db_url = format!("sqlite:{}", db_path.display());
     info!("Using database at: {}", db_url);
     let registry = std::sync::Arc::new(crate::registry::Registry::new(&db_url, &cmd.config_dir).await?);
 
     // Build application
     let app = axum::Router::new()
-        .nest("/api", crate::api::modules::router(registry))
+        .nest("/api", crate::api::modules::router(registry.clone()))
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     info!("Starting server on {}", addr);

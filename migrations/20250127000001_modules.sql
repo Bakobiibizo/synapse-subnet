@@ -1,0 +1,9 @@
+-- Create modules table
+CREATE TABLE IF NOT EXISTS modules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    module_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'stopped',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

@@ -2,6 +2,8 @@ use super::*;
 use crate::retry::{
     RetryConfig, RetryContext, RetryError, RetryManager, RetryableOperation,
 };
+use crate::config::PriorityLevel;
+use async_trait::async_trait;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +17,7 @@ struct TestOperation {
 impl RetryableOperation for TestOperation {
     type Output = bool;
 
-    async fn execute(&self, context: &RetryContext) -> Result<Self::Output, RetryError> {
+    async fn execute(&self, _context: &RetryContext) -> Result<Self::Output, RetryError> {
         let attempts = self.fail_count.fetch_add(1, Ordering::SeqCst);
         if attempts < self.target_success {
             Err(RetryError::OperationFailed("Not yet successful".to_string()))
@@ -142,7 +144,7 @@ async fn test_priority_based_delays() {
 #[tokio::test]
 async fn test_concurrent_retries() {
     let config = RetryConfig::new(PriorityLevel::High);
-    let retry_manager = RetryManager::new(config);
+    let retry_manager = Arc::new(RetryManager::new(config));
 
     let fail_count = Arc::new(AtomicU32::new(0));
     let operation1 = TestOperation {
@@ -154,10 +156,16 @@ async fn test_concurrent_retries() {
         target_success: 3,
     };
 
-    let (result1, result2) = tokio::join!(
-        retry_manager.execute(&operation1),
-        retry_manager.execute(&operation2)
-    );
+    let retry_manager_clone = retry_manager.clone();
+    let fut1 = async move {
+        retry_manager_clone.execute(&operation1).await
+    };
+
+    let fut2 = async move {
+        retry_manager.execute(&operation2).await
+    };
+
+    let (result1, result2) = tokio::join!(fut1, fut2);
 
     assert!(result1.is_ok());
     assert!(result2.is_ok());

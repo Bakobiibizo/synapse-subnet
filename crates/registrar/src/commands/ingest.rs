@@ -1,12 +1,8 @@
 use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
-use registrar_core::{ModuleType, ModuleStatus};
-use time::OffsetDateTime;
-use std::io::Write;
-use crate::Registry;
 use tokio::process::Command;
-use sqlx;
+use std::os::unix::fs::PermissionsExt;
 
 const CONFIG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config");
 const MODULES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/subnet-modules");
@@ -31,18 +27,28 @@ impl IngestCommand {
         // Create modules directory if it doesn't exist
         std::fs::create_dir_all(MODULES_DIR)?;
         
-        // Create temporary directory for cloning
-        let temp_dir = tempfile::tempdir()?;
+        // Create a known directory for cloning
+        let temp_dir = std::path::PathBuf::from("/home/administrator/tmp/module_clone");
+        std::fs::create_dir_all(&temp_dir)?;
+        
+        // Explicitly set permissions
+        std::fs::set_permissions(&temp_dir, std::fs::Permissions::from_mode(0o777))?;
+        
+        // Debug logging
+        println!("Temp directory: {}", temp_dir.display());
+        println!("Temp directory permissions: {:?}", std::fs::metadata(&temp_dir)?.permissions());
+        println!("Current user: {}", std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
         
         // Clone the repository using git command
         println!("Cloning repository {}...", self.repo);
         let status = Command::new("git")
+            .current_dir(&temp_dir)  // Explicitly set current directory
             .args([
                 "clone",
                 "--depth", "1",
                 "--branch", &self.branch,
                 &self.repo,
-                temp_dir.path().to_str().unwrap()
+                "."  // Clone directly into the temp directory
             ])
             .status()
             .await?;
@@ -52,130 +58,22 @@ impl IngestCommand {
         }
         
         // Get module name from repo URL or custom name
-        let name = self.name.clone().unwrap_or_else(|| {
-            self.repo
-                .split('/')
-                .last()
-                .unwrap()
-                .trim_end_matches(".git")
-                .to_string()
-        });
-
-        // Clean up existing module if it exists
-        let db_url = format!("sqlite:{}/data/registrar.db", env!("CARGO_MANIFEST_DIR"));
-        let registry = Registry::new(&db_url, PathBuf::from(CONFIG_DIR).join(&name)).await?;
-        
-        // Delete from database if exists
-        sqlx::query!(
-            r#"
-            DELETE FROM subnet_modules
-            WHERE name = ?1
-            "#,
-            name
-        )
-        .execute(&registry.db().clone())
-        .await?;
-        
-        // Remove module directory
-        let module_dir = PathBuf::from(CONFIG_DIR).join(&name);
-        if module_dir.exists() {
-            std::fs::remove_dir_all(&module_dir)?;
-        }
-
-        // Create module config directory
-        let module_config_dir = PathBuf::from(CONFIG_DIR).join(&name);
-        std::fs::create_dir_all(&module_config_dir)?;
-
-        // Copy directory contents
-        copy_dir_all(temp_dir.path(), &module_config_dir)?;
-
-        // Read .env.example and prompt for values
-        let temp_path = temp_dir.path();
-        let env_example = if temp_path.join(".env.example").exists() {
-            std::fs::read_to_string(temp_path.join(".env.example"))?
-        } else {
-            create_default_env_template(&name)
+        let module_name = match &self.name {
+            Some(name) => name.clone(),
+            None => {
+                let repo_parts: Vec<&str> = self.repo.split('/').collect();
+                repo_parts[repo_parts.len() - 1]
+                    .replace(".git", "")
+                    .to_lowercase()
+            }
         };
 
-        // Parse .env.example and prompt for values
-        let mut env_content = String::new();
-        
-        // Always add GITHUB_REPOSITORY first
-        env_content.push_str("GITHUB_REPOSITORY=hydra-dynamix/zangief\n");
-        
-        // Process each line from .env.example
-        for line in env_example.lines() {
-            if line.starts_with('#') || line.trim().is_empty() {
-                continue;
-            }
-            
-            // Skip if it's GITHUB_REPOSITORY since we already added it
-            if line.contains("GITHUB_REPOSITORY") {
-                continue;
-            }
+        // Copy to modules directory
+        let module_dir = PathBuf::from(MODULES_DIR).join(&module_name);
+        std::fs::create_dir_all(&module_dir)?;
+        copy_dir_all(&temp_dir, &module_dir)?;
 
-            if let Some((key, default_value)) = line.split_once('=') {
-                let key = key.trim();
-                let default_value = default_value.trim();
-
-                print!("{} [default: {}]: ", key, default_value);
-                std::io::stdout().flush()?;
-
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-                let value = input.trim();
-
-                let final_value = if value.is_empty() { default_value } else { value };
-                env_content.push_str(&format!("{}={}\n", key, final_value));
-            }
-        }
-
-        // Add COMMUNE_URL to env_content
-        env_content.push_str("COMMUNE_URL=ws://commune.synai.dev:9944\n");
-
-        // Write the .env file
-        std::fs::write(module_config_dir.join(".env"), env_content)?;
-
-        // Create config.yaml
-        let config = create_config_yaml(&name)?;
-        std::fs::write(module_config_dir.join("config.yaml"), config)?;
-
-        let registry_module = crate::registry::RegistryModule {
-            id: 0,
-            name: name.to_string(),
-            version: "0.1.0".to_string(),
-            repo_url: self.repo.to_string(),
-            branch: self.branch.to_string(),
-            description: String::new(),
-            author: String::new(),
-            license: String::new(),
-            created_at: OffsetDateTime::now_utc(),
-            updated_at: OffsetDateTime::now_utc(),
-            downloads: 0,
-            module_type: ModuleType::Validator.to_string(),
-            status: ModuleStatus::Stopped.to_string(),
-        };
-
-        registry.create_module(&registry_module).await?;
-
-        println!("\nModule '{}' ingested successfully!", name);
-        println!("Configuration files created in: {}", module_config_dir.display());
-        
-        // Launch with docker-compose
-        println!("\nStarting module with docker-compose...");
-        let docker_compose_path = format!("{}/{}/docker-compose.yml", CONFIG_DIR, name);
-        let status = Command::new("docker")
-            .args(["compose", "-f", &docker_compose_path, "up", "-d"])
-            .status()
-            .await?;
-
-        if status.success() {
-            println!("Module started successfully!");
-        } else {
-            println!("Warning: Failed to start module container");
-        }
-
-        Ok(name)
+        Ok(module_name)
     }
 }
 

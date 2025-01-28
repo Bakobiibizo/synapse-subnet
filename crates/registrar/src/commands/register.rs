@@ -39,7 +39,10 @@ impl RegisterCommand {
             name: None,
             branch: "main".to_string(),
         };
+        
+        println!("Attempting to clone repository: {}", self.repo);
         let module_name = ingest_cmd.run().await?;
+        println!("Successfully cloned module: {}", module_name);
 
         // Create environment file
         let config_dir = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/config"));

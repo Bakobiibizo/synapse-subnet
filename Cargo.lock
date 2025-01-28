@@ -2011,6 +2011,9 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "async-trait",
+ "bollard",
+ "chrono",
+ "futures-util",
  "mockall",
  "serde",
  "serde_json",

@@ -1,9 +1,10 @@
 use super::*;
 use crate::stake::{
-    StakeError, StakeInfo, StakeManager, StakeManagerImpl, StakeTransaction,
-    StakeTransactionStatus, StakeTransactionType,
+    StakeError, StakeManager, StakeManagerImpl, StakeTransactionStatus, StakeTransactionType,
 };
-use std::time::SystemTime;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::test;
 
 #[tokio::test]
 async fn test_stake_manager_creation() {
@@ -43,8 +44,7 @@ async fn test_auto_restake() {
     let mut stake_manager = StakeManagerImpl::new(1000, true);
 
     // Simulate earning rewards
-    let mut info = stake_manager.get_stake_info().await.unwrap();
-    info.rewards_earned = 100;
+    stake_manager.get_stake_info().await.unwrap();
 
     // Test restaking
     let tx = stake_manager.restake().await.unwrap();
@@ -63,8 +63,7 @@ async fn test_claim_rewards() {
     let mut stake_manager = StakeManagerImpl::new(1000, false);
 
     // Simulate earning rewards
-    let mut info = stake_manager.get_stake_info().await.unwrap();
-    info.rewards_earned = 100;
+    stake_manager.get_stake_info().await.unwrap();
 
     // Test claiming rewards
     let tx = stake_manager.claim_rewards().await.unwrap();
@@ -82,8 +81,6 @@ async fn test_stake_verification() {
 
     // Test stake verification
     assert!(stake_manager.verify_stake().await.unwrap());
-
-    // TODO: Add more test cases when verify_stake is implemented
 }
 
 #[tokio::test]
@@ -105,17 +102,27 @@ async fn test_invalid_stake_operations() {
 
 #[tokio::test]
 async fn test_concurrent_operations() {
-    let mut stake_manager = StakeManagerImpl::new(1000, false);
+    let stake_manager = Arc::new(Mutex::new(StakeManagerImpl::new(1000, false)));
 
     // Simulate concurrent stake operations
-    let stake_fut1 = stake_manager.stake(500);
-    let stake_fut2 = stake_manager.stake(300);
+    let stake_manager_clone = stake_manager.clone();
+    let stake_fut1 = async move {
+        let mut guard = stake_manager_clone.lock().await;
+        guard.stake(500).await
+    };
+
+    let stake_manager_clone = stake_manager.clone();
+    let stake_fut2 = async move {
+        let mut guard = stake_manager_clone.lock().await;
+        guard.stake(300).await
+    };
 
     let (result1, result2) = tokio::join!(stake_fut1, stake_fut2);
     assert!(result1.is_ok());
     assert!(result2.is_ok());
 
     // Verify final stake amount
-    let info = stake_manager.get_stake_info().await.unwrap();
+    let guard = stake_manager.lock().await;
+    let info = guard.get_stake_info().await.unwrap();
     assert_eq!(info.amount, 1800);
 }
